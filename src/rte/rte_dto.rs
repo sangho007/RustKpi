@@ -3,13 +3,20 @@ use opencv::core::Mat;
 
 #[derive(Debug, Clone)]
 pub enum VfbEvent {
-    CamRawData(Arc<DtoCamRaw>),
-    CamProcessedData(Arc<DtoCamProcessed>),
-    CamLaneAngleData(Arc<DtoCamLaneAngle>),
-    CamCamBirdEyeViewData(Arc<DtoCamBirdEyeView>),
+    // Cam
+    CamRawEvent(Arc<DtoCamRaw>),
+    CamProcessedEvent(Arc<DtoCamProcessed>),
+    CamLaneAngleEvent(Arc<DtoCamLaneAngle>),
+    CamCamBirdEyeViewEvent(Arc<DtoCamBirdEyeView>),
+    // UltraSonic
+    UltraSonicRawEvent(Arc<DtoUltraSonicRaw>),
+    // Servo
+    ServoCtrlEvent(Arc<DtoServoCtrl>),
+    // DcMotor
+    DcMotorCtrlEvent(Arc<DtoDcMotorCtrl>),
 }
 
-#[derive(Debug)] // Clone을 제거하고 필요 시 수동으로 구현하거나 Arc::clone()을 사용합니다.
+#[derive(Debug)]
 pub struct DtoCamRaw {
     pub img: Arc<Mat>, // Mat -> Arc<Mat>
     pub width: u32,
@@ -68,9 +75,37 @@ impl DtoCamBirdEyeView {
 
 #[derive(Debug, Clone)]
 pub struct DtoUltraSonicRaw {
-    pub distance: f64,
+    pub distance: f32,
     pub alive_cnt:u32,
 }
+
+impl DtoUltraSonicRaw {
+    pub fn new(distance: f32, alive_cnt: u32) -> Self {
+        Self { distance, alive_cnt }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DtoServoCtrl {
+    pub channel: u8,    // 제어할 서보 채널 (예: 0, 1, 2)
+    pub angle: u32,     // 서보의 목표 각도 (0.0 ~ 180.0)
+}
+
+impl DtoServoCtrl {
+    pub fn new(channel: u8, angle: u32) -> Self {
+        Self { channel, angle }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DtoDcMotorCtrl {
+    pub direction: u32,     // 서보의 목표 각도 (0.0 ~ 180.0)
+    pub speed: u32,
+    pub alive_cnt: u32,
+}
+
+
+
 
 
 

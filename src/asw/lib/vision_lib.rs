@@ -1254,55 +1254,6 @@ fn hconcat_2(img1: &Mat, img2: &Mat, dst: &mut Mat) -> Result<()> {
     Ok(())
 }
 
-/// **내부 헬퍼 함수**
-/// 이진 영상에서 각 row별로 0이 아닌 픽셀의 x좌표를 모아둔 벡터를 생성합니다.
-///
-/// # 반환
-/// * `Vec<Vec<i32>>` : `i`번째 원소는 `i`번째 row의 nonzero 픽셀 x좌표 목록
-///
-/// # Rust 문법 장점
-/// - 슬라이스(`&[u8]`) 접근 시 범위 검사가 이루어지므로 버퍼 오버플로를 방지합니다.
-/// - unsafe를 최소화(또는 사용 안 함)하고도 고성능 코드를 작성할 수 있습니다.
-// #[inline(always)]
-// fn get_nonzero_points_by_row(binary_img: &Mat) -> Result<Vec<Vec<i32>>> {
-//     // (1) 단일 채널(CV_8UC1) 영상인지 확인
-//     if binary_img.channels() != 1 {
-//         return Err(opencv::Error::new(
-//             opencv::core::StsUnmatchedFormats,
-//             "Expected a single-channel (CV_8UC1) image.",
-//         ));
-//     }
-
-//     let rows = binary_img.rows();
-//     let cols = binary_img.cols();
-
-//     // (2) 한 행(row)이 차지하는 바이트 (stride) 구하기
-//     let step = binary_img.step1(0)? as usize;
-
-//     // (3) data_bytes() → Mat 전체 버퍼를 & [u8] 형태로 가져옴
-//     let data = binary_img.data_bytes()?;
-
-//     // (4) 결과 벡터 준비
-//     let mut result = vec![Vec::new(); rows as usize];
-
-//     // (5) 각 row를 순회하며, nonzero 픽셀(x좌표)만 수집
-//     for y in 0..rows {
-//         let row_start = y as usize * step;
-//         let row_end = row_start + cols as usize;
-//         let row_slice = &data[row_start..row_end.min(data.len())];
-
-//         let row_vec = &mut result[y as usize];
-//         for x in 0..cols {
-//             if row_slice[x as usize] != 0 {
-//                 row_vec.push(x);
-//             }
-//         }
-//     }
-
-//     Ok(result)
-// }
-
-
 /// **내부 헬퍼 함수 (병렬 처리 적용)**
 /// 이진 영상에서 각 row별로 0이 아닌 픽셀의 x좌표를 모아둔 벡터를 생성합니다.
 /// Rayon을 이용해 각 행(row)의 연산을 여러 CPU 코어에 분배하여 처리 속도를 높입니다.

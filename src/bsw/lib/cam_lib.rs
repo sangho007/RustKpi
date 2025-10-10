@@ -1,0 +1,1 @@
+pub const CAM_MODE: i32 = 1;

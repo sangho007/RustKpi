@@ -6,10 +6,10 @@ use opencv::core::Mat;
 use opencv::{videoio, Result, prelude::*};
 use tokio::time;
 
-const CAM_MODE: i32 = 1;
-
 pub async fn ea_cam_provider(tx: VfbSender, debug: DebugSender) -> Result<()> {
     let mut alive_cnt = 0;
+    let mut cam_raw;
+    let mut event;
 
     // 비디오 파일이나 카메라 장치를 엽니다.
     let cammode = false;
@@ -38,10 +38,10 @@ pub async fn ea_cam_provider(tx: VfbSender, debug: DebugSender) -> Result<()> {
             }
         }
 
-        let cam_raw = DtoCamRaw::new(Arc::new(frame), 1280, 720, alive_cnt);
+        cam_raw = DtoCamRaw::new(Arc::new(frame), 1280, 720, alive_cnt);
 
         // 새로 만든 구조체의 소유권을 Arc로 넘깁니다.
-        let event = VfbEvent::CamRawData(Arc::new(cam_raw));
+        event = VfbEvent::CamRawEvent(Arc::new(cam_raw));
         let _ = tx.send(event.clone());
         let _ = debug.send(event.clone());
 

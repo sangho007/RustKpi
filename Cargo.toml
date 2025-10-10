@@ -9,6 +9,8 @@ opencv = "0.94.2"
 rayon = "1.11.0"
 hc-sr04 = "0.1.2"
 rppal = "0.22.1"
+linux-embedded-hal = { version = "0.4", features = ["gpio_cdev"] }
+pwm-pca9685 = "1.0.0"
 
 [profile.release]
 opt-level = 3

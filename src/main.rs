@@ -16,8 +16,10 @@ async fn main() -> opencv::Result<()> {
 
     // BSW Task 생성
     tokio::spawn(bsw::ecu_abs_cam::ea_cam_provider(vfb_sender.clone(), debug_sender.clone()));
+    tokio::spawn(bsw::ecu_abs_ultrasonic::ea_ultrasonic_provider(vfb_sender.clone(), debug_sender.clone()));
+    tokio::spawn(bsw::ecu_abs_pca9685::ea_pca9685_actuator("MotorControl", vfb_sender.clone()));
 
-    // ASW Task 생성 (GUI 코드 없음)
+    // ASW Task 생성
     tokio::spawn(asw::vision::runnable_pre_processing("PreProcess", vfb_sender.clone(), debug_sender.clone()));
     tokio::spawn(asw::vision::runnable_get_lane_angle("LaneAngle", vfb_sender.clone(), debug_sender.clone()));
 
@@ -25,8 +27,8 @@ async fn main() -> opencv::Result<()> {
 
     // 디버깅용 코드
     println!("== 시스템 실행 중... (GUI 창에서 'q'를 누르면 종료) ==");
-    // let mut debug_receiver_main = debug_sender.subscribe();
-    let mut vfb_receiver_main = vfb_sender.subscribe();
+    let mut debug_receiver_main = debug_sender.subscribe();
+    // let mut vfb_receiver_main = vfb_sender.subscribe();
 
     // GUI를 위한 윈도우 생성
     highgui::named_window("CAM View", highgui::WINDOW_AUTOSIZE)?;
@@ -37,15 +39,15 @@ async fn main() -> opencv::Result<()> {
 
     // Main 스레드에서 GUI 이벤트 루프 실행
     loop {
-        // match debug_receiver_main.recv().await {
-        match vfb_receiver_main.recv().await {
-            Ok(VfbEvent::CamProcessedData(cam_processed)) => {
+        match debug_receiver_main.recv().await {
+        // match vfb_receiver_main.recv().await {
+            Ok(VfbEvent::CamProcessedEvent(cam_processed)) => {
                 latest_processed_frame = Some(cam_processed);
             }
-            Ok(VfbEvent::CamCamBirdEyeViewData(birds_eye)) => {
+            Ok(VfbEvent::CamCamBirdEyeViewEvent(birds_eye)) => {
                 latest_birds_eye_frame = Some(birds_eye);
             }
-            Ok(VfbEvent::CamLaneAngleData(lane_angle)) => {
+            Ok(VfbEvent::CamLaneAngleEvent(lane_angle)) => {
                 // 데이터는 이전처럼 그냥 출력
                 println!("Angle: {}, alive_cnt: {}", lane_angle.angle, lane_angle.alive_cnt);
             }
@@ -56,12 +58,12 @@ async fn main() -> opencv::Result<()> {
         }
 
         // 2. 렌더링: 저장된 최신 프레임이 있다면 화면에 표시
-        if let Some(frame) = &latest_processed_frame {
-            highgui::imshow("CAM View", &*frame.img)?;
-        }
-        if let Some(frame) = &latest_birds_eye_frame {
-            highgui::imshow("Bird's Eye View", &*frame.img)?;
-        }
+        // if let Some(frame) = &latest_processed_frame {
+        //     highgui::imshow("CAM View", &*frame.img)?;
+        // }
+        // if let Some(frame) = &latest_birds_eye_frame {
+        //     highgui::imshow("Bird's Eye View", &*frame.img)?;
+        // }
 
         // wait_key를 호출해야 실제로 창이 업데이트되고 키 입력을 받을 수 있습니다.
         // 1ms 대기하며, 'q' 키(ASCII 113)가 입력되면 루프를 탈출합니다.

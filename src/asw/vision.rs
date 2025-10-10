@@ -19,7 +19,7 @@ pub async fn runnable_pre_processing(id: &'static str, tx: VfbSender, debug: Deb
     loop {
         // 1. 이벤트 수신 및 데이터 준비
         let cam_raw = match rx.recv().await {
-            Ok(VfbEvent::CamRawData(data)) => data, // 처리할 데이터만 추출
+            Ok(VfbEvent::CamRawEvent(data)) => data, // 처리할 데이터만 추출
             Err(RecvError::Lagged(n)) => { continue; }
             _ => { continue; } // 관심 없는 이벤트는 무시
         };
@@ -42,7 +42,7 @@ pub async fn runnable_pre_processing(id: &'static str, tx: VfbSender, debug: Deb
 
         // 3. 결과 전송
         let cam_preprocessed = DtoCamProcessed::new(Arc::new(closed), 1280, 720, alive_cnt);
-        let event = VfbEvent::CamProcessedData(Arc::new(cam_preprocessed));
+        let event = VfbEvent::CamProcessedEvent(Arc::new(cam_preprocessed));
 
         let _ = tx.send(event.clone());
         let _ = debug.send(event.clone());
@@ -61,7 +61,7 @@ pub async fn runnable_get_lane_angle(id: &'static str, tx: VfbSender, debug: Deb
     loop {
         // 1. 이벤트 수신 및 데이터 준비
         let cam_processed = match rx.recv().await {
-            Ok(VfbEvent::CamProcessedData(data)) => data, // 처리할 데이터만 추출
+            Ok(VfbEvent::CamProcessedEvent(data)) => data, // 처리할 데이터만 추출
             Err(RecvError::Lagged(n)) => {
                 eprintln!("[{}] Error receiving event: {}", id, n);
                 continue;
@@ -87,12 +87,12 @@ pub async fn runnable_get_lane_angle(id: &'static str, tx: VfbSender, debug: Deb
 
         // 3. 결과 전송
         let lane_angle_dto = DtoCamLaneAngle::new(steering_angle, alive_cnt);
-        let event = VfbEvent::CamLaneAngleData(Arc::new(lane_angle_dto));
+        let event = VfbEvent::CamLaneAngleEvent(Arc::new(lane_angle_dto));
         let _ = tx.send(event.clone());
         let _ = debug.send(event.clone());
 
         let birds_eye_view_dto = DtoCamBirdEyeView::new(Arc::new(birds_eye_img), 1280, 720, alive_cnt);
-        let event2 = VfbEvent::CamCamBirdEyeViewData(Arc::new(birds_eye_view_dto));
+        let event2 = VfbEvent::CamCamBirdEyeViewEvent(Arc::new(birds_eye_view_dto));
         let _ = debug.send(event2.clone());
 
         alive_cnt += 1;
