@@ -1,26 +1,25 @@
 // main.rs
 
-mod Rte;
-mod Bsw;
-mod Asw;
+mod rte;
+mod bsw;
+mod asw;
 
 use std::sync::Arc;
-use tokio;
 use opencv::highgui;
-use crate::Rte::Rte_Dto::{VfbEvent, Dto_CamRaw};
-use crate::Rte::Rte_Dto::*;
+use crate::rte::rte_dto::{VfbEvent};
+use crate::rte::rte_dto::*;
 
 #[tokio::main]
 async fn main() -> opencv::Result<()> {
-    let vfb_sender = Rte::Rte_Main::init();
-    let debug_sender = Rte::Rte_Main::debug_init();
+    let vfb_sender = rte::rte_main::init();
+    let debug_sender = rte::rte_main::debug_init();
 
     // BSW Task 생성
-    tokio::spawn(Bsw::EcuAbs_Cam::EA_CamProvider(vfb_sender.clone(), debug_sender.clone()));
+    tokio::spawn(bsw::ecu_abs_cam::ea_cam_provider(vfb_sender.clone(), debug_sender.clone()));
 
     // ASW Task 생성 (GUI 코드 없음)
-    tokio::spawn(Asw::Vision::Runnable_PreProcessing("PreProcess", vfb_sender.clone(), debug_sender.clone()));
-    tokio::spawn(Asw::Vision::Runnable_GetLaneAngle("LaneAngle", vfb_sender.clone(), debug_sender.clone()));
+    tokio::spawn(asw::vision::runnable_pre_processing("PreProcess", vfb_sender.clone(), debug_sender.clone()));
+    tokio::spawn(asw::vision::runnable_get_lane_angle("LaneAngle", vfb_sender.clone(), debug_sender.clone()));
 
 
 
@@ -33,8 +32,8 @@ async fn main() -> opencv::Result<()> {
     highgui::named_window("CAM View", highgui::WINDOW_AUTOSIZE)?;
 
     // 각 창에 표시할 최신 프레임을 저장할 변수 (루프 외부에 선언)
-    let mut latest_processed_frame: Option<Arc<Dto_CamProcessed>> = None;
-    let mut latest_birds_eye_frame: Option<Arc<Dto_CamBirdEyeView>> = None;
+    let mut latest_processed_frame: Option<Arc<DtoCamProcessed>> = None;
+    let mut latest_birds_eye_frame: Option<Arc<DtoCamBirdEyeView>> = None;
 
     // Main 스레드에서 GUI 이벤트 루프 실행
     loop {

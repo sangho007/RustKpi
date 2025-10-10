@@ -210,8 +210,10 @@ impl Pipeline {
     /// - Rust에서 함수 호출 시 빌린 참조(&)를 사용합니다.
     ///   이는 C++의 레퍼런스와 유사하지만, Rust의 빌림 규칙(Borrow Checker)에 의해
     ///   컴파일 시점에 안전성이 보장됩니다.
-    pub fn gray_scale(&self, img: &Mat, dst: &mut Mat){
-        imgproc::cvt_color(img, dst, imgproc::COLOR_BGR2GRAY, 0, ALGO_HINT_DEFAULT).expect("");
+    pub(crate) fn gray_scale(&self, img: &Mat) -> Result<Mat> {
+        let mut gray = Mat::default();
+        imgproc::cvt_color(img, &mut gray, imgproc::COLOR_BGR2GRAY, 0, ALGO_HINT_DEFAULT)?;
+        Ok(gray)
     }
 
     /// 히스토그램 평활화 예시 함수(현재 사용 안 함).
@@ -222,8 +224,10 @@ impl Pipeline {
     ///   Rust에서는 FFI(외부 함수 인터페이스)를 안전하게 감싼 `opencv` crate를 통해
     ///   에러나 메모리 관리를 보다 견고히 할 수 있습니다.
     #[allow(dead_code)]
-    pub fn equalize_hist(&self, img: &Mat, dst: &mut Mat){
-        imgproc::equalize_hist(img, dst).expect("");
+    fn equalize_hist(&self, img: &Mat) -> Result<Mat> {
+        let mut dst = Mat::default();
+        imgproc::equalize_hist(img, &mut dst)?;
+        Ok(dst)
     }
 
     /// 가우시안 블러를 적용하여 영상 노이즈를 줄입니다.
@@ -236,16 +240,18 @@ impl Pipeline {
     ///
     /// # Rust 문법 장점
     /// - `?`를 통해 에러가 자동 전파되므로, 각 단계별 에러 처리를 간결히 표현 가능합니다.
-    pub fn noise_removal(&self, img: &Mat, dst: &mut Mat) {
+    pub(crate) fn noise_removal(&self, img: &Mat) -> Result<Mat> {
+        let mut dst = Mat::default();
         imgproc::gaussian_blur(
             img,
-            dst,
+            &mut dst,
             Size::new(5, 5),
             0.0,
             0.0,
             core::BORDER_DEFAULT,
             ALGO_HINT_DEFAULT
-        ).expect("");
+        )?;
+        Ok(dst)
     }
 
     /// 캐니(Canny) 엣지 검출을 수행합니다.
@@ -255,8 +261,10 @@ impl Pipeline {
     ///
     /// # 반환
     /// * 엣지를 나타내는 이진(0/255) 영상
-    pub fn edge_detection(&self, img: &Mat, dst: &mut Mat) {
-        imgproc::canny(img, dst, 200.0, 350.0, 3, false).expect("");
+    pub(crate) fn edge_detection(&self, img: &Mat) -> Result<Mat> {
+        let mut edges = Mat::default();
+        imgproc::canny(img, &mut edges, 200.0, 350.0, 3, false)?;
+        Ok(edges)
     }
 
     /// 모폴로지 닫힘(Closing) 연산을 적용하여 엣지 사이 간격을 메우고 잡음 제거.
@@ -266,18 +274,20 @@ impl Pipeline {
     ///
     /// # 반환
     /// * 닫힘(Closing) 처리된 영상
-    pub fn morphology_close(&self, img: &Mat, dst: &mut Mat){
-        let kernel = Mat::ones(3, 3, CV_8UC1).unwrap().to_mat().unwrap();
+    pub(crate) fn morphology_close(&self, img: &Mat) -> Result<Mat> {
+        let kernel = Mat::ones(3, 3, CV_8UC1)?.to_mat()?;
+        let mut dst = Mat::default();
         imgproc::morphology_ex(
             img,
-            dst,
+            &mut dst,
             imgproc::MORPH_CLOSE,
             &kernel,
             Point::new(-1, -1),
             1,
             core::BORDER_CONSTANT,
             Scalar::default(),
-        ).expect("");
+        )?;
+        Ok(dst)
     }
 
     /// 관심영역(ROI)만 남기고 외부 영역을 제거합니다.
@@ -291,14 +301,14 @@ impl Pipeline {
     /// # Rust 문법 장점
     /// - `Vec<Point>`를 사용해 동적 크기의 꼭짓점 목록을 관리하고,
     ///   OpenCV에 넘길 때도 `.as_slice()` 등으로 안전하게 참조가 가능합니다.
-    pub fn roi(&self, img: &Mat, dst: &mut Mat){
+    pub(crate) fn roi(&self, img: &Mat) -> Result<Mat> {
         // 영상과 동일한 크기의 검정색 마스크 생성
-        let mut mask = Mat::zeros(img.rows(), img.cols(), img.typ()).unwrap().to_mat().unwrap();
+        let mut mask = Mat::zeros(img.rows(), img.cols(), img.typ())?.to_mat()?;
         {
             // self.vertices(4개 점)을 Mat 형태로 변환
-            let mat_boxed = Mat::from_slice(&self.vertices).unwrap();
-            let sub_mat_box = mat_boxed.reshape(2, self.vertices.len() as i32).unwrap();
-            let sub_mat = sub_mat_box.try_clone().unwrap();
+            let mat_boxed = Mat::from_slice(&self.vertices)?;
+            let sub_mat_box = mat_boxed.reshape(2, self.vertices.len() as i32)?;
+            let sub_mat = sub_mat_box.try_clone()?;
 
             let mut contour_vec: Vector<Mat> = Vector::new();
             contour_vec.push(sub_mat);
@@ -311,11 +321,13 @@ impl Pipeline {
                 imgproc::LINE_8,
                 0,
                 Point::new(0, 0),
-            ).expect("");
+            )?;
         }
 
         // mask와 bitwise_and를 하여 ROI 내부만 살림
-        core::bitwise_and(img, &mask, dst, &Mat::default()).expect("");
+        let mut masked_img = Mat::default();
+        core::bitwise_and(img, &mask, &mut masked_img, &Mat::default())?;
+        Ok(masked_img)
     }
 
     /// 입력 이미지를 Bird's-eye(탑뷰)로 투시 변환합니다.
@@ -325,16 +337,18 @@ impl Pipeline {
     ///
     /// # 반환
     /// * 탑뷰로 변환된 결과 영상
-    pub fn perspective_transform(&self, img: &Mat, dst: &mut Mat){
+    pub(crate) fn perspective_transform(&self, img: &Mat) -> Result<Mat> {
+        let mut result = Mat::default();
         imgproc::warp_perspective(
             img,
-            dst,
+            &mut result,
             &self.transform_matrix,
             Size::new(self.width, self.height),
             imgproc::INTER_LINEAR,
             core::BORDER_CONSTANT,
             Scalar::default(),
-        ).expect("");
+        )?;
+        Ok(result)
     }
 
     /// Bird's-eye로 변환된 영상을 다시 원근 시야로 역투시 변환합니다.
@@ -344,16 +358,18 @@ impl Pipeline {
     ///
     /// # 반환
     /// * 원근 시야(원본 좌표)에 대응하는 영상
-    pub fn inv_perspective_transform(&self, img: &Mat, dst: &mut Mat){
+    fn inv_perspective_transform(&self, img: &Mat) -> Result<Mat> {
+        let mut result = Mat::default();
         imgproc::warp_perspective(
             img,
-            dst,
+            &mut result,
             &self.inv_transform_matrix,
             Size::new(self.width, self.height),
             imgproc::INTER_LINEAR,
             core::BORDER_CONSTANT,
             Scalar::default(),
-        ).expect("");
+        )?;
+        Ok(result)
     }
 
     /// **슬라이딩 윈도우** 방식을 이용하여 차선을 탐지합니다.
@@ -391,59 +407,60 @@ impl Pipeline {
         minpix: i32,
         draw_windows: bool,
     ) -> Result<(Mat, Vec<f64>, Vec<f64>, bool, bool)> {
+
         // -------------------------------------------
         // 1) row별로 nonzero x좌표를 미리 분류
         // -------------------------------------------
         let nonzero_points_by_row = get_nonzero_points_by_row(binary_img)?;
 
         // -------------------------------------------
-        // 2) [REFACTORED] 시각화용 out_img, window_img를 draw_windows가 true일 때만 준비
+        // 2) 시각화용 out_img, window_img 준비
         // -------------------------------------------
-        let (mut out_img, mut window_img) = if draw_windows {
-            // 시각화용 out_img 준비
-            let mut out = Mat::new_size_with_default(
-                binary_img.size()?,
-                CV_8UC3,
-                Scalar::all(0.0)
-            )?;
-            // 이진 영상을 3채널로 변환해 out_img에 합치기
-            {
-                use opencv::core::Vector;
-                let mut channels: Vector<Mat> = Vector::new();
-                channels.push(binary_img.clone());
-                channels.push(binary_img.clone());
-                channels.push(binary_img.clone());
-                core::merge(&channels, &mut out)?;
-            }
+        let mut out_img = Mat::new_size_with_default(
+            binary_img.size()?,
+            CV_8UC3,
+            Scalar::all(0.0)
+        )?;
 
-            // 시각화용 window_img 준비
-            let mut window = Mat::zeros(
-                self.height,
-                self.width + 2 * self.window_margin,
-                CV_8UC3
-            )?.to_mat()?;
-            // out_img를 window_img 중앙 영역에 복사
-            {
-                let roi = core::Rect::new(self.window_margin, 0, self.width, self.height);
-                let mut window_roi = window.roi(roi)?.try_clone()?;
-                out.copy_to(&mut window_roi)?;
-            }
-            (out, window)
-        } else {
-            // 시각화하지 않을 경우, 빈 Mat 객체를 생성
-            (Mat::default(), Mat::default())
-        };
+        // 이진 영상을 3채널로 변환해 out_img에 합치기
+        {
+            use opencv::core::Vector;
+            let mut channels: Vector<Mat> = Vector::new();
+            channels.push(binary_img.clone());
+            channels.push(binary_img.clone());
+            channels.push(binary_img.clone());
+            core::merge(&channels, &mut out_img)?;
+        }
 
+        // 시각화용 window_img: (height x (width + 2*margin))
+        let mut window_img = Mat::zeros(
+            self.height,
+            self.width + 2 * self.window_margin,
+            CV_8UC3
+        )?.to_mat()?;
+
+        // out_img를 window_img 중앙 영역에 복사
+        {
+            let roi = core::Rect::new(self.window_margin, 0, self.width, self.height);
+            let mut window_roi = window_img.roi(roi)?.try_clone()?;
+            out_img.copy_to(&mut window_roi)?;
+        }
 
         // -------------------------------------------
         // 3) 슬라이딩 윈도우 매개변수
         // -------------------------------------------
         let midpoint = self.width / 2;
         let window_height = self.height / nwindows;
+
+        // 현재 (왼/오) x좌표
         let mut leftx_current = self.leftx_base;
         let mut rightx_current = self.rightx_base;
+
+        // 한쪽이 픽셀 없을 때 다른 쪽 따라가기 위해 이전 좌표 보관
         let mut leftx_past = leftx_current;
         let mut rightx_past = rightx_current;
+
+        // 윈도우 탐색 후, 왼/오 차선 픽셀 (y, x) 목록
         let mut left_lane_points: Vec<(i32, i32)> = Vec::new();
         let mut right_lane_points: Vec<(i32, i32)> = Vec::new();
 
@@ -453,74 +470,150 @@ impl Pipeline {
         for window_i in 0..nwindows {
             let win_y_low = self.height - (window_i + 1) * window_height;
             let win_y_high = self.height - window_i * window_height;
+
             let win_xleft_low = leftx_current - margin;
             let win_xleft_high = leftx_current + margin;
             let win_xright_low = rightx_current - margin;
             let win_xright_high = rightx_current + margin;
 
-            // (4-1) [REFACTORED] 시각화용 사각형 그리기를 draw_windows가 true일 때만 수행
+            // (4-1) 시각화용 사각형 그리기
             if draw_windows {
+                // 왼쪽 윈도우 사각형
                 imgproc::rectangle(
                     &mut out_img,
-                    core::Rect::new(win_xleft_low, win_y_low, (win_xleft_high - win_xleft_low).max(0), (win_y_high - win_y_low).max(0)),
-                    Scalar::new(0.0, 255.0, 0.0, 255.0), 2, imgproc::LINE_8, 0
+                    core::Rect::new(
+                        win_xleft_low,
+                        win_y_low,
+                        (win_xleft_high - win_xleft_low).max(0),
+                        (win_y_high - win_y_low).max(0)
+                    ),
+                    Scalar::new(0.0, 255.0, 0.0, 255.0),
+                    2,
+                    imgproc::LINE_8,
+                    0
                 )?;
+                // 오른쪽 윈도우 사각형
                 imgproc::rectangle(
                     &mut out_img,
-                    core::Rect::new(win_xright_low, win_y_low, (win_xright_high - win_xright_low).max(0), (win_y_high - win_y_low).max(0)),
-                    Scalar::new(0.0, 255.0, 0.0, 255.0), 2, imgproc::LINE_8, 0
+                    core::Rect::new(
+                        win_xright_low,
+                        win_y_low,
+                        (win_xright_high - win_xright_low).max(0),
+                        (win_y_high - win_y_low).max(0)
+                    ),
+                    Scalar::new(0.0, 255.0, 0.0, 255.0),
+                    2,
+                    imgproc::LINE_8,
+                    0
+                )?;
+
+                // window_img에도 연분홍색으로 사각형
+                imgproc::rectangle(
+                    &mut window_img,
+                    core::Rect::new(
+                        win_xleft_low + self.window_margin,
+                        win_y_low,
+                        (win_xleft_high - win_xleft_low).max(0),
+                        (win_y_high - win_y_low).max(0)
+                    ),
+                    Scalar::new(255.0, 100.0, 100.0, 255.0),
+                    1,
+                    imgproc::LINE_8,
+                    0
                 )?;
                 imgproc::rectangle(
                     &mut window_img,
-                    core::Rect::new(win_xleft_low + self.window_margin, win_y_low, (win_xleft_high - win_xleft_low).max(0), (win_y_high - win_y_low).max(0)),
-                    Scalar::new(255.0, 100.0, 100.0, 255.0), 1, imgproc::LINE_8, 0
-                )?;
-                imgproc::rectangle(
-                    &mut window_img,
-                    core::Rect::new(win_xright_low + self.window_margin, win_y_low, (win_xright_high - win_xright_low).max(0), (win_y_high - win_y_low).max(0)),
-                    Scalar::new(255.0, 100.0, 100.0, 255.0), 1, imgproc::LINE_8, 0
+                    core::Rect::new(
+                        win_xright_low + self.window_margin,
+                        win_y_low,
+                        (win_xright_high - win_xright_low).max(0),
+                        (win_y_high - win_y_low).max(0)
+                    ),
+                    Scalar::new(255.0, 100.0, 100.0, 255.0),
+                    1,
+                    imgproc::LINE_8,
+                    0
                 )?;
             }
 
             // (4-2) 이 윈도우 범위 안의 픽셀 찾기 (row 단위)
             let mut good_left_count = 0;
             let mut good_right_count = 0;
+
             for y in win_y_low..win_y_high {
-                if y < 0 || y >= self.height { continue; }
+                if y < 0 || y >= self.height {
+                    continue;
+                }
+                // 해당 row에 있는 nonzero x좌표들
                 let row_nonzeros = &nonzero_points_by_row[y as usize];
-                for &x in row_nonzeros.iter().filter(|&&x| x >= win_xleft_low && x < win_xleft_high) {
+
+                // 왼쪽 윈도우 범위
+                let left_in_range = row_nonzeros.iter().filter(|&&x| {
+                    x >= win_xleft_low && x < win_xleft_high
+                });
+                for &x in left_in_range {
                     left_lane_points.push((y, x));
                     good_left_count += 1;
                 }
-                for &x in row_nonzeros.iter().filter(|&&x| x >= win_xright_low && x < win_xright_high) {
+
+                // 오른쪽 윈도우 범위
+                let right_in_range = row_nonzeros.iter().filter(|&&x| {
+                    x >= win_xright_low && x < win_xright_high
+                });
+                for &x in right_in_range {
                     right_lane_points.push((y, x));
                     good_right_count += 1;
                 }
             }
 
-            // (4-3) ~ (4-5) 나머지 로직은 동일
+            // (4-3) 픽셀이 일정 이상이면, 그 픽셀들의 평균 x좌표를 새 중심으로
             if good_left_count as i32 > minpix {
-                let sum_x: i32 = left_lane_points.iter().rev().take(good_left_count).map(|&(_y, x)| x).sum();
-                leftx_current = (sum_x as f64 / good_left_count as f64) as i32;
+                let sum_x: i32 = left_lane_points
+                    .iter()
+                    .rev()
+                    .take(good_left_count as usize)
+                    .map(|&(_y, x)| x)
+                    .sum();
+                let mean_x = sum_x as f64 / good_left_count as f64;
+                leftx_current = mean_x as i32;
             }
             if good_right_count as i32 > minpix {
-                let sum_x: i32 = right_lane_points.iter().rev().take(good_right_count).map(|&(_y, x)| x).sum();
-                rightx_current = (sum_x as f64 / good_right_count as f64) as i32;
+                let sum_x: i32 = right_lane_points
+                    .iter()
+                    .rev()
+                    .take(good_right_count as usize)
+                    .map(|&(_y, x)| x)
+                    .sum();
+                let mean_x = sum_x as f64 / good_right_count as f64;
+                rightx_current = mean_x as i32;
             }
+
+            // (4-4) 한쪽만 픽셀이 부족하면, 다른 쪽 이동량 따라감
             if (good_left_count as i32) < minpix {
-                leftx_current += rightx_current - rightx_past;
+                leftx_current = leftx_current + (rightx_current - rightx_past);
             }
             if (good_right_count as i32) < minpix {
-                rightx_current += leftx_current - leftx_past;
+                rightx_current = rightx_current + (leftx_current - leftx_past);
             }
+
+            // (4-5) 첫 윈도우에서 기준점 갱신
             if window_i == 0 {
-                if leftx_current > midpoint + 40 { leftx_current = midpoint + 40; }
-                if leftx_current < 0 { leftx_current = 0; }
-                if rightx_current < midpoint - 40 { rightx_current = midpoint - 40; }
-                if rightx_current > self.width { rightx_current = self.width; }
+                if leftx_current > midpoint + 40 {
+                    leftx_current = midpoint + 40;
+                }
+                if leftx_current < 0 {
+                    leftx_current = 0;
+                }
+                if rightx_current < midpoint - 40 {
+                    rightx_current = midpoint - 40;
+                }
+                if rightx_current > self.width {
+                    rightx_current = self.width;
+                }
                 self.leftx_base = leftx_current;
                 self.rightx_base = rightx_current;
             }
+
             leftx_past = leftx_current;
             rightx_past = rightx_current;
         }
@@ -538,6 +631,7 @@ impl Pipeline {
             rightx_vals.push(x as f64);
             righty_vals.push(y as f64);
         }
+
         let left_lane_detected = leftx_vals.len() >= 5000;
         let right_lane_detected = rightx_vals.len() >= 5000;
 
@@ -546,49 +640,80 @@ impl Pipeline {
         // -------------------------------------------
         if left_lane_detected {
             if let Some(fit) = polyfit_2d(&lefty_vals, &leftx_vals) {
-                self.left_a.push(fit[0]); self.left_b.push(fit[1]); self.left_c.push(fit[2]);
+                self.left_a.push(fit[0]);
+                self.left_b.push(fit[1]);
+                self.left_c.push(fit[2]);
             }
         }
         if right_lane_detected {
             if let Some(fit) = polyfit_2d(&righty_vals, &rightx_vals) {
-                self.right_a.push(fit[0]); self.right_b.push(fit[1]); self.right_c.push(fit[2]);
+                self.right_a.push(fit[0]);
+                self.right_b.push(fit[1]);
+                self.right_c.push(fit[2]);
             }
         }
 
         // -------------------------------------------
-        // 7) [REFACTORED] 마스크를 이용한 픽셀 색칠을 draw_windows가 true일 때만 수행
+        // 7) 마스크를 이용해 픽셀 색칠 (out_img, window_img)
         // -------------------------------------------
-        if draw_windows {
-            let mut left_mask = Mat::zeros(binary_img.rows(), binary_img.cols(), CV_8UC1)?.to_mat()?;
-            let mut right_mask = Mat::zeros(binary_img.rows(), binary_img.cols(), CV_8UC1)?.to_mat()?;
-            for &(y, x) in &left_lane_points {
-                if y >= 0 && y < self.height && x >= 0 && x < self.width { *left_mask.at_2d_mut::<u8>(y, x)? = 255; }
-            }
-            for &(y, x) in &right_lane_points {
-                if y >= 0 && y < self.height && x >= 0 && x < self.width { *right_mask.at_2d_mut::<u8>(y, x)? = 255; }
-            }
-            out_img.set_to(&Scalar::new(255.0, 0.0, 0.0, 255.0), &left_mask)?;
-            out_img.set_to(&Scalar::new(0.0, 0.0, 255.0, 255.0), &right_mask)?;
+        let binary_img_rows = binary_img.rows();
+        let binary_img_cols = binary_img.cols();
 
-            let mut left_mask_w = Mat::zeros(window_img.rows(), window_img.cols(), CV_8UC1)?.to_mat()?;
-            let mut right_mask_w = Mat::zeros(window_img.rows(), window_img.cols(), CV_8UC1)?.to_mat()?;
-            for &(y, x) in &left_lane_points {
-                let x_shifted = x + self.window_margin;
-                if y >= 0 && y < self.height && x_shifted >= 0 && x_shifted < (self.width + 2 * self.window_margin) { *left_mask_w.at_2d_mut::<u8>(y, x_shifted)? = 255; }
+        let mut left_mask = Mat::zeros(binary_img_rows, binary_img_cols, CV_8UC1)?.to_mat()?;
+        let mut right_mask = Mat::zeros(binary_img_rows, binary_img_cols, CV_8UC1)?.to_mat()?;
+
+        // 왼쪽/오른쪽 차선 픽셀 좌표에 255 할당
+        for &(y, x) in &left_lane_points {
+            if y >= 0 && y < self.height && x >= 0 && x < self.width {
+                *left_mask.at_2d_mut::<u8>(y, x)? = 255;
             }
-            for &(y, x) in &right_lane_points {
-                let x_shifted = x + self.window_margin;
-                if y >= 0 && y < self.height && x_shifted >= 0 && x_shifted < (self.width + 2 * self.window_margin) { *right_mask_w.at_2d_mut::<u8>(y, x_shifted)? = 255; }
-            }
-            window_img.set_to(&Scalar::new(255.0, 0.0, 0.0, 255.0), &left_mask_w)?;
-            window_img.set_to(&Scalar::new(0.0, 0.0, 255.0, 255.0), &right_mask_w)?;
         }
+        for &(y, x) in &right_lane_points {
+            if y >= 0 && y < self.height && x >= 0 && x < self.width {
+                *right_mask.at_2d_mut::<u8>(y, x)? = 255;
+            }
+        }
+
+        // out_img에 왼쪽=파랑, 오른쪽=빨강 칠하기
+        out_img.set_to(&Scalar::new(255.0, 0.0, 0.0, 255.0), &left_mask)?;
+        out_img.set_to(&Scalar::new(0.0, 0.0, 255.0, 255.0), &right_mask)?;
+
+        // window_img에 마스크를 margin만큼 x좌표 shift해서 칠하기
+        let window_img_rows = window_img.rows();
+        let window_img_cols = window_img.cols();
+
+        let mut left_mask_w = Mat::zeros(window_img_rows, window_img_cols, CV_8UC1)?.to_mat()?;
+        let mut right_mask_w = Mat::zeros(window_img_rows, window_img_cols, CV_8UC1)?.to_mat()?;
+
+        for &(y, x) in &left_lane_points {
+            let x_shifted = x + self.window_margin;
+            if y >= 0 && y < self.height && x_shifted >= 0 && x_shifted < (self.width + 2*self.window_margin) {
+                *left_mask_w.at_2d_mut::<u8>(y, x_shifted)? = 255;
+            }
+        }
+        for &(y, x) in &right_lane_points {
+            let x_shifted = x + self.window_margin;
+            if y >= 0 && y < self.height && x_shifted >= 0 && x_shifted < (self.width + 2*self.window_margin) {
+                *right_mask_w.at_2d_mut::<u8>(y, x_shifted)? = 255;
+            }
+        }
+
+        window_img.set_to(&Scalar::new(255.0, 0.0, 0.0, 255.0), &left_mask_w)?;
+        window_img.set_to(&Scalar::new(0.0, 0.0, 255.0, 255.0), &right_mask_w)?;
 
         // -------------------------------------------
         // 8) 최근 10개 계수 평균 내서 안정화
         // -------------------------------------------
-        let left_fit_avg = [mean_of_last_10(&self.left_a), mean_of_last_10(&self.left_b), mean_of_last_10(&self.left_c)];
-        let right_fit_avg = [mean_of_last_10(&self.right_a), mean_of_last_10(&self.right_b), mean_of_last_10(&self.right_c)];
+        let left_fit_avg = [
+            mean_of_last_10(&self.left_a),
+            mean_of_last_10(&self.left_b),
+            mean_of_last_10(&self.left_c),
+        ];
+        let right_fit_avg = [
+            mean_of_last_10(&self.right_a),
+            mean_of_last_10(&self.right_b),
+            mean_of_last_10(&self.right_c),
+        ];
 
         // -------------------------------------------
         // 9) ploty에 따라 최종 x좌표 (ax^2 + bx + c)
@@ -596,8 +721,11 @@ impl Pipeline {
         let mut left_fitx = Vec::with_capacity(self.ploty.len());
         let mut right_fitx = Vec::with_capacity(self.ploty.len());
         for &yv in &self.ploty {
-            left_fitx.push(left_fit_avg[0] * yv * yv + left_fit_avg[1] * yv + left_fit_avg[2]);
-            right_fitx.push(right_fit_avg[0] * yv * yv + right_fit_avg[1] * yv + right_fit_avg[2]);
+            let lx = left_fit_avg[0]*yv*yv + left_fit_avg[1]*yv + left_fit_avg[2];
+            left_fitx.push(lx);
+
+            let rx = right_fit_avg[0]*yv*yv + right_fit_avg[1]*yv + right_fit_avg[2];
+            right_fitx.push(rx);
         }
 
         // -------------------------------------------
@@ -608,7 +736,7 @@ impl Pipeline {
             self.rightx_base = self.rightx_mid + 30;
         }
 
-        // 반환 (out_img는 시각화 결과 또는 빈 Mat)
+        // 반환
         Ok((out_img, left_fitx, right_fitx, left_lane_detected, right_lane_detected))
     }
 
@@ -623,7 +751,7 @@ impl Pipeline {
     ///
     /// # 반환
     /// - `steering_angle`: 새로 계산된 조향각(도 단위)
-    pub fn get_angle_on_lane(
+    pub(crate) fn get_angle_on_lane(
         &mut self,
         left_fitx: &[f64],
         right_fitx: &[f64],
@@ -714,7 +842,7 @@ impl Pipeline {
     ///
     /// # 반환
     /// * 조향각 직선이 그려진 최종 영상
-    pub fn display_heading_line(
+    fn display_heading_line(
         &self,
         base_img: &Mat,
         overlay_img: &Mat,
@@ -785,34 +913,27 @@ impl Pipeline {
     /// - 함수가 길더라도 `?` 연산자를 통해 에러 처리를 단순화할 수 있어
     ///   가독성을 유지할 수 있습니다.
     pub fn processing(&mut self, frame: &Mat) -> Result<Mat> {
-        let mut gray = Mat::default();
-        let mut blur = Mat::default();
-        let mut edges = Mat::default();
-        let mut closed = Mat::default();
-        let mut roi_img = Mat::default();
-        let mut birds_eye = Mat::default();
-
         let start_time = Instant::now();
 
         let img = frame.clone();
 
         // 1) 그레이 변환
-        self.gray_scale(&img, &mut gray);
+        let gray = self.gray_scale(&img)?;
 
         // 2) 가우시안 블러
-        self.noise_removal(&gray, &mut blur);
+        let blur = self.noise_removal(&gray)?;
 
         // 3) 캐니 엣지
-        self.edge_detection(&blur, &mut edges);
+        let edges = self.edge_detection(&blur)?;
 
         // 4) 모폴로지 닫힘
-        self.morphology_close(&edges, &mut closed);
+        let closed = self.morphology_close(&edges)?;
 
         // 5) ROI
-        self.roi(&closed, &mut roi_img);
+        let roi_img = self.roi(&closed)?;
 
         // 6) Bird's-eye 투시 변환
-        self.perspective_transform(&roi_img, &mut birds_eye);
+        let birds_eye = self.perspective_transform(&roi_img)?;
 
         // 7) 슬라이딩 윈도우
         let (sliding_window_img, left_fitx, right_fitx, left_lane_detected, right_lane_detected) =
@@ -836,8 +957,7 @@ impl Pipeline {
             )?;
 
             // 10) 원근 시야로 역투시 변환
-            let mut inv_trans = Mat::default();
-            self.inv_perspective_transform(&sliding_with_line, &mut inv_trans);
+            let inv_trans = self.inv_perspective_transform(&sliding_with_line)?;
 
             // 11) 원본 영상과 합성
             let mut total_processed = Mat::default();
@@ -994,7 +1114,7 @@ impl Pipeline {
 ///   C++의 경우 보통 예외나 특정 flag 값을 리턴하지만, Rust는 `Option` enum으로
 ///   실패 시 None을 리턴해, 호출부에서 안전하게 처리 가능.
 #[inline(always)]
-pub fn polyfit_1d(xs: &[f64], ys: &[f64]) -> Option<[f64; 2]> {
+fn polyfit_1d(xs: &[f64], ys: &[f64]) -> Option<[f64; 2]> {
     if xs.len() < 2 || xs.len() != ys.len() {
         return None;
     }
@@ -1033,7 +1153,7 @@ pub fn polyfit_1d(xs: &[f64], ys: &[f64]) -> Option<[f64; 2]> {
 ///   C/C++이라면 구조체나 포인터를 써야 하는데, Rust에서는 튜플/배열/구조체 등 다양한
 ///   방법으로 반환 형식을 명확히 표현할 수 있습니다.
 #[inline(always)]
-pub fn polyfit_2d(xs: &[f64], ys: &[f64]) -> Option<[f64; 3]> {
+fn polyfit_2d(xs: &[f64], ys: &[f64]) -> Option<[f64; 3]> {
     if xs.len() < 3 || xs.len() != ys.len() {
         return None;
     }
@@ -1110,7 +1230,7 @@ pub fn polyfit_2d(xs: &[f64], ys: &[f64]) -> Option<[f64; 3]> {
 /// 벡터의 마지막 10개 원소의 평균값을 구합니다.
 /// 길이가 10보다 작으면 전체 평균을 구합니다.
 #[inline(always)]
-pub fn mean_of_last_10(vec: &Vec<f64>) -> f64 {
+fn mean_of_last_10(vec: &Vec<f64>) -> f64 {
     let len = vec.len();
     if len == 0 {
         return 0.0;
@@ -1189,7 +1309,7 @@ fn hconcat_2(img1: &Mat, img2: &Mat, dst: &mut Mat) -> Result<()> {
 ///
 /// # 반환
 /// * `Vec<Vec<i32>>` : `i`번째 원소는 `i`번째 row의 nonzero 픽셀 x좌표 목록
-pub fn get_nonzero_points_by_row(binary_img: &Mat) -> Result<Vec<Vec<i32>>> {
+fn get_nonzero_points_by_row(binary_img: &Mat) -> Result<Vec<Vec<i32>>> {
     // (1) 단일 채널(CV_8UC1) 영상인지 확인
     if binary_img.channels() != 1 {
         return Err(opencv::Error::new(

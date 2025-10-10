@@ -1,12 +1,12 @@
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use crate::Rte::Rte_Dto;
+use crate::rte::rte_dto;
 
-pub type VfbSender = broadcast::Sender<Rte_Dto::VfbEvent>;
-pub type VfbReceiver = broadcast::Receiver<Rte_Dto::VfbEvent>;
+pub type VfbSender = broadcast::Sender<rte_dto::VfbEvent>;
+pub type VfbReceiver = broadcast::Receiver<rte_dto::VfbEvent>;
 
-pub type DebugSender = broadcast::Sender<Rte_Dto::VfbEvent>;
-pub type DebugReceiver = broadcast::Receiver<Rte_Dto::VfbEvent>;
+pub type DebugSender = broadcast::Sender<rte_dto::VfbEvent>;
+pub type DebugReceiver = broadcast::Receiver<rte_dto::VfbEvent>;
 
 
 
