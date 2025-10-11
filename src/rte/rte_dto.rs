@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use opencv::core::Mat;
+use crate::asw::lib::vs_trafficlight_lib::TrafficLightColor;
 
 #[derive(Debug, Clone)]
 pub enum VfbEvent {
@@ -7,9 +8,11 @@ pub enum VfbEvent {
     CamRawEvent(Arc<DtoCamRaw>),
     CamProcessedEvent(Arc<DtoCamProcessed>),
     CamLaneAngleEvent(Arc<DtoCamLaneAngle>),
-    CamCamBirdEyeViewEvent(Arc<DtoCamBirdEyeView>),
+    CamBirdEyeViewEvent(Arc<DtoCamBirdEyeView>),
+    CamTrafficLightEvent(Arc<DtoTrafficLight>),
     // UltraSonic
     UltraSonicRawEvent(Arc<DtoUltraSonicRaw>),
+    UltraSonicObstacleDetectedEvent(Arc<DtoUltraSonicObstacle>),
     // Servo
     ServoCtrlEvent(Arc<DtoServoCtrl>),
     // DcMotor
@@ -103,6 +106,38 @@ pub struct DtoDcMotorCtrl {
     pub speed: u32,
     pub alive_cnt: u32,
 }
+
+impl DtoDcMotorCtrl {
+    pub fn new(direction: u32, speed: u32, alive_cnt: u32) -> Self {
+        Self { direction, speed, alive_cnt }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DtoUltraSonicObstacle {
+    pub detected: bool,
+    pub alive_cnt: u32,
+}
+
+impl DtoUltraSonicObstacle {
+    pub fn new(detected: bool, alive_cnt: u32) -> Self {
+        Self { detected, alive_cnt }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DtoTrafficLight {
+    pub traffic_light_color: TrafficLightColor,
+    pub alive_cnt: u32,
+}
+
+impl DtoTrafficLight {
+    pub fn new(traffic_light_color: TrafficLightColor, alive_cnt: u32) -> Self {
+        Self { traffic_light_color, alive_cnt }
+    }
+}
+
+
 
 
 

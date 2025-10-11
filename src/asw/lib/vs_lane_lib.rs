@@ -70,14 +70,14 @@ pub struct Pipeline {
     rightx_base: i32,
 
     /// 왼쪽 차선 2차 곡선 계수(a, b, c) 이력을 저장하는 벡터
-    left_a: Vec<f64>,
-    left_b: Vec<f64>,
-    left_c: Vec<f64>,
+    pub(crate) left_a: Vec<f64>,
+    pub(crate) left_b: Vec<f64>,
+    pub(crate) left_c: Vec<f64>,
 
     /// 오른쪽 차선 2차 곡선 계수(a, b, c) 이력을 저장하는 벡터
-    right_a: Vec<f64>,
-    right_b: Vec<f64>,
-    right_c: Vec<f64>,
+    pub(crate) right_a: Vec<f64>,
+    pub(crate) right_b: Vec<f64>,
+    pub(crate) right_c: Vec<f64>,
 
     /// 플롯용 y좌표 목록(0부터 height-1까지)
     ploty: Vec<f64>,
@@ -739,6 +739,223 @@ impl Pipeline {
         // 반환
         Ok((out_img, left_fitx, right_fitx, left_lane_detected, right_lane_detected))
     }
+    /// **이미 검출된 차선 주변에서만 픽셀을 탐색하여 연산 속도를 높입니다.**
+    ///
+    /// 이 함수는 `sliding_window`와 달리, 이전 프레임에서 성공적으로
+    /// 찾은 차선 다항식(polynomial) 주변의 'margin' 영역만 탐색합니다.
+    ///
+    /// # 주요 단계
+    /// 1. 이전 프레임들로부터 계산된 평균 차선 곡선(fit)을 가져옴.
+    /// 2. 이미지의 모든 행(y)에 대해, 이 곡선 주변 `margin` 내에 있는
+    ///    0이 아닌 픽셀만 수집.
+    /// 3. 수집된 픽셀들로 새로운 2차 곡선(Polyfit)을 추정.
+    ///
+    /// # 반환
+    /// 1. 탐색 영역과 검출된 차선을 시각화한 3채널 Mat (`out_img`)
+    /// 2. 왼쪽 차선 x좌표 곡선(`left_fitx`)
+    /// 3. 오른쪽 차선 x좌표 곡선(`right_fitx`)
+    /// 4. 왼쪽 차선 인식 여부(`left_lane_detected`)
+    /// 5. 오른쪽 차선 인식 여부(`right_lane_detected`)
+    ///
+    /// # 매개변수
+    /// * `binary_img` : 차선 탐색을 수행할 이진 영상
+    /// * `margin` : 기존 차선 곡선 주변으로 탐색할 좌우 폭
+    pub fn search_around_poly(
+        &mut self,
+        binary_img: &Mat,
+        margin: i32,
+    ) -> Result<(Mat, Vec<f64>, Vec<f64>, bool, bool)> {
+        // -------------------------------------------
+        // 1) 이전 프레임들의 차선 계수 평균값 가져오기
+        // -------------------------------------------
+        let left_fit_avg = [
+            mean_of_last_10(&self.left_a),
+            mean_of_last_10(&self.left_b),
+            mean_of_last_10(&self.left_c),
+        ];
+        let right_fit_avg = [
+            mean_of_last_10(&self.right_a),
+            mean_of_last_10(&self.right_b),
+            mean_of_last_10(&self.right_c),
+        ];
+
+        // -------------------------------------------
+        // 2) row별로 0이 아닌 x좌표 미리 분류
+        // -------------------------------------------
+        let nonzero_points_by_row = get_nonzero_points_by_row(binary_img)?;
+        let (height, width) = (binary_img.rows(), binary_img.cols());
+
+        // -------------------------------------------
+        // 3) 이전 차선 주변의 픽셀들만 선택
+        // -------------------------------------------
+        let mut left_lane_points: Vec<(i32, i32)> = Vec::new();
+        let mut right_lane_points: Vec<(i32, i32)> = Vec::new();
+
+        for y in 0..height {
+            let y_f64 = y as f64;
+            let leftx_center =
+                left_fit_avg[0] * y_f64 * y_f64 + left_fit_avg[1] * y_f64 + left_fit_avg[2];
+            let rightx_center =
+                right_fit_avg[0] * y_f64 * y_f64 + right_fit_avg[1] * y_f64 + right_fit_avg[2];
+
+            let left_search_low = (leftx_center - margin as f64) as i32;
+            let left_search_high = (leftx_center + margin as f64) as i32;
+            let right_search_low = (rightx_center - margin as f64) as i32;
+            let right_search_high = (rightx_center + margin as f64) as i32;
+
+            let row_nonzeros = &nonzero_points_by_row[y as usize];
+            for &x in row_nonzeros {
+                if x >= left_search_low && x < left_search_high {
+                    left_lane_points.push((y, x));
+                }
+                if x >= right_search_low && x < right_search_high {
+                    right_lane_points.push((y, x));
+                }
+            }
+        }
+
+        // -------------------------------------------
+        // 4) 최종 (x,y) 좌표 분리 & 차선 픽셀 개수로 인식 여부 판정
+        // -------------------------------------------
+        let (mut leftx_vals, mut lefty_vals) = (Vec::new(), Vec::new());
+        for &(y, x) in &left_lane_points {
+            leftx_vals.push(x as f64);
+            lefty_vals.push(y as f64);
+        }
+        let (mut rightx_vals, mut righty_vals) = (Vec::new(), Vec::new());
+        for &(y, x) in &right_lane_points {
+            rightx_vals.push(x as f64);
+            righty_vals.push(y as f64);
+        }
+
+        let left_lane_detected = leftx_vals.len() >= 5000;
+        let right_lane_detected = rightx_vals.len() >= 5000;
+
+        // -------------------------------------------
+        // 5) 새로운 2차 곡선 피팅 (현재 프레임 기준)
+        // -------------------------------------------
+        if left_lane_detected {
+            if let Some(fit) = polyfit_2d(&lefty_vals, &leftx_vals) {
+                self.left_a.push(fit[0]);
+                self.left_b.push(fit[1]);
+                self.left_c.push(fit[2]);
+            }
+        }
+        if right_lane_detected {
+            if let Some(fit) = polyfit_2d(&righty_vals, &rightx_vals) {
+                self.right_a.push(fit[0]);
+                self.right_b.push(fit[1]);
+                self.right_c.push(fit[2]);
+            }
+        }
+
+        // -------------------------------------------
+        // 6) 최근 계수 평균으로 안정화 및 최종 x좌표 계산
+        // -------------------------------------------
+        let new_left_fit_avg = [
+            mean_of_last_10(&self.left_a),
+            mean_of_last_10(&self.left_b),
+            mean_of_last_10(&self.left_c),
+        ];
+        let new_right_fit_avg = [
+            mean_of_last_10(&self.right_a),
+            mean_of_last_10(&self.right_b),
+            mean_of_last_10(&self.right_c),
+        ];
+
+        let mut left_fitx = Vec::with_capacity(self.ploty.len());
+        let mut right_fitx = Vec::with_capacity(self.ploty.len());
+        for &yv in &self.ploty {
+            let lx = new_left_fit_avg[0] * yv * yv + new_left_fit_avg[1] * yv + new_left_fit_avg[2];
+            left_fitx.push(lx);
+            let rx =
+                new_right_fit_avg[0] * yv * yv + new_right_fit_avg[1] * yv + new_right_fit_avg[2];
+            right_fitx.push(rx);
+        }
+
+        // -------------------------------------------
+        // 7) 결과 시각화
+        // -------------------------------------------
+        let mut out_img = Mat::default();
+        imgproc::cvt_color(&binary_img, &mut out_img, imgproc::COLOR_GRAY2BGR, 0, ALGO_HINT_DEFAULT)?;
+
+        let mut window_img = Mat::zeros(height, width, CV_8UC3)?.to_mat()?;
+
+        let mut left_line_pts_inner: Vector<core::Point> = Vector::new();
+        let mut left_line_pts_outer: Vector<core::Point> = Vector::new();
+        let mut right_line_pts_inner: Vector<core::Point> = Vector::new();
+        let mut right_line_pts_outer: Vector<core::Point> = Vector::new();
+
+        for i in 0..self.ploty.len() {
+            let y = self.ploty[i] as i32;
+            left_line_pts_inner.push(core::Point::new(left_fitx[i] as i32 - margin, y));
+            left_line_pts_outer.push(core::Point::new(left_fitx[i] as i32 + margin, y));
+            right_line_pts_inner.push(core::Point::new(right_fitx[i] as i32 - margin, y));
+            right_line_pts_outer.push(core::Point::new(right_fitx[i] as i32 + margin, y));
+        }
+
+        let mut left_pts: Vector<core::Point> = Vector::new();
+        left_pts.extend(left_line_pts_inner.iter());
+        left_pts.extend(left_line_pts_outer.iter().rev());
+
+        let mut right_pts: Vector<core::Point> = Vector::new();
+        right_pts.extend(right_line_pts_inner.iter());
+        right_pts.extend(right_line_pts_outer.iter().rev());
+
+        // [수정된 부분] `Vec<Vector<...>>` 대신 `Vector<Vector<...>>` 사용
+        let mut left_polygons: Vector<Vector<core::Point>> = Vector::new();
+        left_polygons.push(left_pts);
+        let mut right_polygons: Vector<Vector<core::Point>> = Vector::new();
+        right_polygons.push(right_pts);
+
+        imgproc::fill_poly(
+            &mut window_img,
+            &left_polygons, // 올바른 타입 전달
+            Scalar::new(0.0, 255.0, 0.0, 255.0),
+            imgproc::LINE_8,
+            0,
+            core::Point::new(0, 0),
+        )?;
+        imgproc::fill_poly(
+            &mut window_img,
+            &right_polygons, // 올바른 타입 전달
+            Scalar::new(0.0, 255.0, 0.0, 255.0),
+            imgproc::LINE_8,
+            0,
+            core::Point::new(0, 0),
+        )?;
+
+        let out_img_src = out_img.clone();
+        core::add_weighted(&out_img_src, 1.0, &window_img, 0.3, 0.0, &mut out_img, -1)?;
+
+        // 검출된 차선 픽셀 색칠
+        for &(y, x) in &left_lane_points {
+            if y >= 0 && y < height && x >= 0 && x < width {
+                *out_img.at_2d_mut::<core::Vec3b>(y, x)? = core::Vec3b::from([255, 0, 0]);
+            }
+        }
+        for &(y, x) in &right_lane_points {
+            if y >= 0 && y < height && x >= 0 && x < width {
+                *out_img.at_2d_mut::<core::Vec3b>(y, x)? = core::Vec3b::from([0, 0, 255]);
+            }
+        }
+
+        // -------------------------------------------
+        // 8) 양쪽 다 인식 안 되면 기준점 리셋 (Sliding Window 재시도 신호)
+        // -------------------------------------------
+        if !left_lane_detected && !right_lane_detected {
+            self.leftx_base = self.leftx_mid - 30;
+            self.rightx_base = self.rightx_mid + 30;
+        }
+
+        Ok((
+            out_img,
+            left_fitx,
+            right_fitx,
+            left_lane_detected,
+            right_lane_detected,
+        ))
+    }
 
     /// 검출된 차선(왼/오)을 토대로 조향각을 계산합니다.
     ///
@@ -936,8 +1153,58 @@ impl Pipeline {
         let birds_eye = self.perspective_transform(&roi_img)?;
 
         // 7) 슬라이딩 윈도우
-        let (sliding_window_img, left_fitx, right_fitx, left_lane_detected, right_lane_detected) =
-            self.sliding_window(&birds_eye, 15, 100, 50, true)?;
+        let sliding_window_img: Mat;
+        let left_fitx: Vec<f64>;
+        let right_fitx: Vec<f64>;
+        let left_lane_detected: bool;
+        let right_lane_detected: bool;
+
+        // 조건: 이전에 차선을 성공적으로 찾은 기록이 있는가?
+        let has_previous_detection = !self.left_a.is_empty() && !self.right_a.is_empty();
+
+        if has_previous_detection {
+            // [빠른 추적] 이전 기록이 있으면, 그 주변만 빠르게 탐색합니다.
+            // println!("✅ 빠른 추적 모드: search_around_poly 실행");
+            let (img, lfx, rfx, l_det, r_det) = self.search_around_poly(&birds_eye, 100)?;
+            println!(
+                "✅ 빠른 추적 실행: Left Pixels = {}, Right Pixels = {}, Left Detected = {}, Right Detected = {}",
+                lfx.len(), rfx.len(), l_det, r_det
+            ); // <--- 로그 추가
+
+            // 결과 할당
+            sliding_window_img = img;
+            left_fitx = lfx;
+            right_fitx = rfx;
+            left_lane_detected = l_det;
+            right_lane_detected = r_det;
+
+            // [실패 처리] 만약 빠른 추적에 실패했다면, 다음 프레임에서 전체 탐색을 하도록 상태를 리셋합니다.
+            if !(left_lane_detected || right_lane_detected) {
+                println!("⚠️ 추적 실패! 다음 프레임에서 전체 탐색을 실시합니다.");
+                self.left_a.clear();
+                self.left_b.clear();
+                self.left_c.clear();
+                self.right_a.clear();
+                self.right_b.clear();
+                self.right_c.clear();
+            }
+        } else {
+            // [전체 탐색] 이전 기록이 없으면, sliding_window로 전체 영역을 탐색합니다.
+            // println!("🔍 전체 탐색 모드: sliding_window 실행");
+            let (img, lfx, rfx, l_det, r_det) =
+                self.sliding_window(&birds_eye, 15, 100, 50, true)?;
+            println!(
+                "🔍 전체 탐색 실행: Left Pixels = {}, Right Pixels = {}, Left Detected = {}, Right Detected = {}",
+                lfx.len(), rfx.len(), l_det, r_det
+            ); // <--- 로그 추가
+
+            // 결과 할당
+            sliding_window_img = img;
+            left_fitx = lfx;
+            right_fitx = rfx;
+            left_lane_detected = l_det;
+            right_lane_detected = r_det;
+        }
 
         // 8) 조향각 계산
         self.steering_angle = self.get_angle_on_lane(
@@ -1099,6 +1366,7 @@ impl Pipeline {
         Ok(())
     }
 }
+
 
 /// (x, y) 데이터로부터 1차 다항식(직선: y = a*x + b)을 최소제곱법(OLS)으로 피팅하는 함수.
 ///

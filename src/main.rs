@@ -20,15 +20,14 @@ async fn main() -> opencv::Result<()> {
     tokio::spawn(bsw::ecu_abs_pca9685::ea_pca9685_actuator("MotorControl", vfb_sender.clone()));
 
     // ASW Task 생성
-    tokio::spawn(asw::vision::runnable_pre_processing("PreProcess", vfb_sender.clone(), debug_sender.clone()));
-    tokio::spawn(asw::vision::runnable_get_lane_angle("LaneAngle", vfb_sender.clone(), debug_sender.clone()));
+    tokio::spawn(asw::vs_lane::runnable_pre_processing("PreProcess", vfb_sender.clone(), debug_sender.clone()));
+    tokio::spawn(asw::vs_lane::runnable_get_lane_angle("LaneAngle", vfb_sender.clone(), debug_sender.clone()));
 
 
 
     // 디버깅용 코드
     println!("== 시스템 실행 중... (GUI 창에서 'q'를 누르면 종료) ==");
-    let mut debug_receiver_main = debug_sender.subscribe();
-    // let mut vfb_receiver_main = vfb_sender.subscribe();
+    let mut vfb_receiver_main = vfb_sender.subscribe();
 
     // GUI를 위한 윈도우 생성
     highgui::named_window("CAM View", highgui::WINDOW_AUTOSIZE)?;
@@ -39,12 +38,11 @@ async fn main() -> opencv::Result<()> {
 
     // Main 스레드에서 GUI 이벤트 루프 실행
     loop {
-        match debug_receiver_main.recv().await {
-        // match vfb_receiver_main.recv().await {
+        match vfb_receiver_main.recv().await {
             Ok(VfbEvent::CamProcessedEvent(cam_processed)) => {
                 latest_processed_frame = Some(cam_processed);
             }
-            Ok(VfbEvent::CamCamBirdEyeViewEvent(birds_eye)) => {
+            Ok(VfbEvent::CamBirdEyeViewEvent(birds_eye)) => {
                 latest_birds_eye_frame = Some(birds_eye);
             }
             Ok(VfbEvent::CamLaneAngleEvent(lane_angle)) => {

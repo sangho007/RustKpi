@@ -59,30 +59,30 @@ pub async fn ea_pca9685_actuator(id: &'static str, tx: VfbSender) {
     loop {
         match rx.recv().await {
             // 서보 모터 제어 이벤트 처리
-            Ok(VfbEvent::ServoCtrlEvent(servo_cmd)) => {
-                if let Some(&target_channel) = SERVO_CHANNELS.get(servo_cmd.channel as usize) {
-                    let pwm_val = angle_to_pwm(servo_cmd.angle);
-                    println!("[BSW] 서보 명령어 수신: 채널 {}, 각도 {}, PWM 설정 값 {}", servo_cmd.channel, servo_cmd.angle, pwm_val);
+            Ok(VfbEvent::ServoCtrlEvent(servo_dto)) => {
+                if let Some(&target_channel) = SERVO_CHANNELS.get(servo_dto.channel as usize) {
+                    let pwm_val = angle_to_pwm(servo_dto.angle);
+                    println!("[BSW] 서보 명령어 수신: 채널 {}, 각도 {}, PWM 설정 값 {}", servo_dto.channel, servo_dto.angle, pwm_val);
                     if let Err(e) = pwm.set_channel_off(target_channel, pwm_val) {
                         eprintln!("[BSW] 서보 채널 {:?} OFF 값 설정 실패: {:?}", target_channel, e);
                     }
                 } else {
-                    eprintln!("[BSW] 잘못된 서보 채널 번호 수신: {}", servo_cmd.channel);
+                    eprintln!("[BSW] 잘못된 서보 채널 번호 수신: {}", servo_dto.channel);
                 }
-            },
+            }
 
             // DC 모터 제어 이벤트 처리
-            Ok(VfbEvent::DcMotorCtrlEvent(dc_cmd)) => {
-                println!("[BSW] DC 모터 명령어 수신: 방향 {}, 속도 {}", dc_cmd.direction, dc_cmd.speed);
+            Ok(VfbEvent::DcMotorCtrlEvent(dcmotor_dto)) => {
+                println!("[BSW] DC 모터 명령어 수신: 방향 {}, 속도 {}", dcmotor_dto.direction, dcmotor_dto.speed);
 
-                match dc_cmd.direction {
+                match dcmotor_dto.direction {
                     1 => { // 정방향
-                        motor_control(&mut pwm, Motor::M1, Direction::Forward, percent_to_pwm(dc_cmd.speed)); // 최대 속도4095
-                        motor_control(&mut pwm, Motor::M2, Direction::Forward, percent_to_pwm(dc_cmd.speed));
+                        motor_control(&mut pwm, Motor::M1, Direction::Forward, percent_to_pwm(dcmotor_dto.speed)); // 최대 속도4095
+                        motor_control(&mut pwm, Motor::M2, Direction::Forward, percent_to_pwm(dcmotor_dto.speed));
                     },
                     2 => { // 역방향
-                        motor_control(&mut pwm, Motor::M1, Direction::Backward, percent_to_pwm(dc_cmd.speed));
-                        motor_control(&mut pwm, Motor::M2, Direction::Backward, percent_to_pwm(dc_cmd.speed));
+                        motor_control(&mut pwm, Motor::M1, Direction::Backward, percent_to_pwm(dcmotor_dto.speed));
+                        motor_control(&mut pwm, Motor::M2, Direction::Backward, percent_to_pwm(dcmotor_dto.speed));
                     },
                     0 => { // 정지
                         motor_stop(&mut pwm, Motor::M1);
@@ -90,7 +90,7 @@ pub async fn ea_pca9685_actuator(id: &'static str, tx: VfbSender) {
                     },
                     _ => continue,
                 }
-            },
+            }
 
             Err(RecvError::Lagged(n)) => {
                 eprintln!("[{}] Error receiving event: Lagged by {}", id, n);
