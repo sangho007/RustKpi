@@ -22,6 +22,8 @@ async fn main() -> opencv::Result<()> {
     // ASW Task 생성
     tokio::spawn(asw::vs_lane::runnable_pre_processing("PreProcess", vfb_sender.clone(), debug_sender.clone()));
     tokio::spawn(asw::vs_lane::runnable_get_lane_angle("LaneAngle", vfb_sender.clone(), debug_sender.clone()));
+    tokio::spawn(asw::uss_obstacle::runnable_obstacle_detection("UssObstacle", vfb_sender.clone(), debug_sender.clone()));
+    tokio::spawn(asw::vs_trafficlight::runnable_trafficlight_detection("TrafficLightDetection", vfb_sender.clone(), debug_sender.clone()));
 
 
 
