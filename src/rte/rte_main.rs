@@ -9,7 +9,7 @@ pub type DebugReceiver = broadcast::Receiver<rte_dto::VfbEvent>;
 
 
 
-const VFB_CHANNEL_CAPACITY: usize = 1;
+const VFB_CHANNEL_CAPACITY: usize = 1000;
 const DEBUG_CHANNEL_CAPACITY: usize = 1000;
 
 pub fn init() -> VfbSender {

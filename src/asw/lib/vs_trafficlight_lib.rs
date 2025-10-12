@@ -164,14 +164,20 @@ impl Pipeline {
 
         // DBSCAN 모델을 설정하고 실행합니다.
         let mut model = dbscan::Model::new(EPSILON, MIN_POINTS);
-        // let mut model = DBSCAN::new(20.0, 15);
-        let result = model.run(&points);
+
+        let points_as_vecs: Vec<Vec<f64>> = points.into_iter().map(|p| p.to_vec()).collect();
+        let result = model.run(&points_as_vecs);
 
         // 각 클러스터의 크기를 계산합니다.
         let mut cluster_counts: HashMap<usize, usize> = HashMap::new();
-        for cluster_id_option in result {
-            if let Some(cluster_id) = cluster_id_option {
-                *cluster_counts.entry(cluster_id).or_insert(0) += 1;
+        for classification in result {
+            match classification {
+                Classification::Core(cluster_id) | Classification::Edge(cluster_id) => {
+                    *cluster_counts.entry(cluster_id).or_insert(0) += 1;
+                }
+                Classification::Noise => {
+                    // 노이즈는 무시
+                }
             }
         }
 
