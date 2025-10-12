@@ -1,8 +1,11 @@
 // 필요한 모듈들을 use 키워드로 가져옵니다.
 use opencv::{
-    core::{self, Mat, Point, Scalar, Size, ToInputArray, ToOutputArray, AlgorithmHint::ALGO_HINT_DEFAULT}, // Size 추가
+    core::{self, AlgorithmHint::ALGO_HINT_DEFAULT, Mat, Point, Scalar, Size}, // Size 추가
     imgproc, Result,
+    prelude::*,
 };
+use dbscan::*;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TrafficLightColor {
@@ -11,6 +14,14 @@ pub enum TrafficLightColor {
     Green,
     Off, // 소등 상태
 }
+
+// 클러스터의 크기를 기반으로 탐지할 최소 픽셀 수
+const MIN_PIXEL_THRESHOLD: usize = 100;
+
+// epsilon: 같은 클러스터로 간주할 최대 거리 (픽셀 단위)
+// min_points: 클러스터를 형성하기 위한 최소 점의 개수
+const EPSILON: f64 = 20.0;
+const MIN_POINTS: usize = 15;
 
 pub struct Pipeline {
     width: i32,
@@ -68,12 +79,9 @@ impl Pipeline {
         let yellow_mask_denoised = self.apply_morphology(&yellow_mask).unwrap_or(yellow_mask);
         let green_mask_denoised = self.apply_morphology(&green_mask).unwrap_or(green_mask);
 
-        // 노이즈가 제거된 마스크에서 0이 아닌 픽셀의 개수를 셉니다.
-        let red_pixels = core::count_non_zero(&red_mask_denoised).unwrap_or(0);
-        let yellow_pixels = core::count_non_zero(&yellow_mask_denoised).unwrap_or(0);
-        let green_pixels = core::count_non_zero(&green_mask_denoised).unwrap_or(0);
-
-        const MIN_PIXEL_THRESHOLD: i32 = 100;
+        let red_pixels = self.find_largest_cluster(&red_mask_denoised);
+        let yellow_pixels = self.find_largest_cluster(&yellow_mask_denoised);
+        let green_pixels = self.find_largest_cluster(&green_mask_denoised);
 
         let detected_color = if red_pixels > MIN_PIXEL_THRESHOLD && red_pixels >= yellow_pixels && red_pixels >= green_pixels {
             TrafficLightColor::Red
@@ -97,8 +105,6 @@ impl Pipeline {
         core::in_range(hsv_frame, &lower_bound, &upper_bound, &mut mask)?;
         Ok(mask)
     }
-
-    // --- ⬇️ 새로 추가된 메서드 ⬇️ ---
 
     /// 모폴로지 열림(Opening) 연산을 적용하여 마스크의 노이즈를 제거합니다.
     ///
@@ -129,5 +135,47 @@ impl Pipeline {
         )?;
 
         Ok(processed_mask)
+    }
+
+    /// 마스크 이미지에서 가장 큰 픽셀 클러스터의 크기를 찾습니다.
+    ///
+    /// # Arguments
+    /// * `mask` - DBSCAN 클러스터링을 적용할 바이너리 마스크 (`&Mat`)
+    ///
+    /// # Returns
+    /// 가장 큰 클러스터에 속한 픽셀의 개수(`usize`)를 반환합니다. 클러스터가 없으면 0을 반환합니다.
+    fn find_largest_cluster(&self, mask: &Mat) -> usize {
+        // 0이 아닌 픽셀의 좌표를 찾습니다.
+        let mut points: Vec<[f64; 2]> = Vec::new();
+        for r in 0..mask.rows() {
+            for c in 0..mask.cols() {
+                if let Ok(pixel_value) = mask.at_2d::<u8>(r, c) {
+                    if *pixel_value != 0 {
+                        // DBSCAN 라이브러리를 위해 [x, y] 좌표를 f64 타입으로 변환
+                        points.push([c as f64, r as f64]);
+                    }
+                }
+            }
+        }
+
+        if points.is_empty() {
+            return 0;
+        }
+
+        // DBSCAN 모델을 설정하고 실행합니다.
+        let mut model = dbscan::Model::new(EPSILON, MIN_POINTS);
+        // let mut model = DBSCAN::new(20.0, 15);
+        let result = model.run(&points);
+
+        // 각 클러스터의 크기를 계산합니다.
+        let mut cluster_counts: HashMap<usize, usize> = HashMap::new();
+        for cluster_id_option in result {
+            if let Some(cluster_id) = cluster_id_option {
+                *cluster_counts.entry(cluster_id).or_insert(0) += 1;
+            }
+        }
+
+        // 가장 큰 클러스터의 크기를 찾습니다.
+        cluster_counts.into_values().max().unwrap_or(0)
     }
 }

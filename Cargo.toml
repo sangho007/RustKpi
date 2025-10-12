@@ -10,7 +10,7 @@ rayon = "1.11.0"
 hc-sr04 = "0.1.2"
 linux-embedded-hal = { version = "0.4", features = ["gpio_cdev"] }
 pwm-pca9685 = "1.0.0"
-nalgebra = "0.32.6"
+dbscan = "0.3.1"
 
 [profile.release]
 opt-level = 3

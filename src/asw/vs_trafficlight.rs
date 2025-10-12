@@ -1,9 +1,9 @@
-use std::sync::Arc;
-use opencv::core::Mat;
-use tokio::sync::broadcast::error::RecvError;
 use crate::asw::lib::vs_trafficlight_lib::*;
+use crate::rte::rte_dto::{DtoTrafficLight, VfbEvent};
 use crate::rte::rte_main::{DebugSender, VfbSender};
-use crate::rte::rte_dto::{VfbEvent,DtoTrafficLight};
+use opencv::core::Mat;
+use std::sync::Arc;
+use tokio::sync::broadcast::error::RecvError;
 
 
 pub async fn runnable_trafficlight_detection(id: &'static str, tx: VfbSender, debug: DebugSender) -> opencv::Result<Mat> {

@@ -1,9 +1,9 @@
-use std::sync::Arc;
-use crate::rte::rte_main::{VfbSender, DebugSender};
-use crate::rte::rte_dto::{VfbEvent, DtoCamRaw};
-use std::time::Duration;
+use crate::rte::rte_dto::{DtoCamRaw, VfbEvent};
+use crate::rte::rte_main::{DebugSender, VfbSender};
 use opencv::core::Mat;
-use opencv::{videoio, Result, prelude::*};
+use opencv::{prelude::*, videoio, Result};
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::time;
 
 pub async fn ea_cam_provider(tx: VfbSender, debug: DebugSender) -> Result<()> {

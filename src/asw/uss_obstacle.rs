@@ -1,8 +1,8 @@
+use crate::asw::lib::uss_lib::*;
+use crate::rte::rte_dto::{DtoUltraSonicObstacle, VfbEvent};
+use crate::rte::rte_main::{DebugSender, VfbSender};
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
-use crate::asw::lib::uss_lib::*;
-use crate::rte::rte_main::{DebugSender, VfbSender};
-use crate::rte::rte_dto::{VfbEvent,DtoUltraSonicObstacle};
 
 pub async fn runnable_obstacle_detection(id: &'static str, tx: VfbSender, debug: DebugSender) {
     let mut rx = tx.subscribe();

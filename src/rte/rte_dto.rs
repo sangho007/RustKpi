@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use opencv::core::Mat;
 use crate::asw::lib::vs_trafficlight_lib::TrafficLightColor;
+use opencv::core::Mat;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub enum VfbEvent {
@@ -24,7 +24,7 @@ pub struct DtoCamRaw {
     pub img: Arc<Mat>, // Mat -> Arc<Mat>
     pub width: u32,
     pub height: u32,
-    pub alive_cnt:u32,
+    pub alive_cnt: u32,
 }
 
 impl DtoCamRaw {
@@ -38,7 +38,7 @@ pub struct DtoCamProcessed {
     pub img: Arc<Mat>, // Mat -> Arc<Mat>
     pub width: u32,
     pub height: u32,
-    pub alive_cnt:u32,
+    pub alive_cnt: u32,
 }
 
 impl DtoCamProcessed {
@@ -53,7 +53,7 @@ impl DtoCamProcessed {
 #[derive(Debug, Clone)]
 pub struct DtoCamLaneAngle {
     pub angle: f64,
-    pub alive_cnt:u32,
+    pub alive_cnt: u32,
 }
 
 impl DtoCamLaneAngle {
@@ -67,7 +67,7 @@ pub struct DtoCamBirdEyeView {
     pub img: Arc<Mat>, // Mat -> Arc<Mat>
     pub width: u32,
     pub height: u32,
-    pub alive_cnt:u32,
+    pub alive_cnt: u32,
 }
 
 impl DtoCamBirdEyeView {
@@ -79,7 +79,7 @@ impl DtoCamBirdEyeView {
 #[derive(Debug, Clone)]
 pub struct DtoUltraSonicRaw {
     pub distance: f32,
-    pub alive_cnt:u32,
+    pub alive_cnt: u32,
 }
 
 impl DtoUltraSonicRaw {
@@ -136,6 +136,7 @@ impl DtoTrafficLight {
         Self { traffic_light_color, alive_cnt }
     }
 }
+
 
 
 

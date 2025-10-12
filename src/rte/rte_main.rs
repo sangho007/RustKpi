@@ -1,5 +1,5 @@
-use tokio::sync::broadcast;
 use crate::rte::rte_dto;
+use tokio::sync::broadcast;
 
 pub type VfbSender = broadcast::Sender<rte_dto::VfbEvent>;
 pub type VfbReceiver = broadcast::Receiver<rte_dto::VfbEvent>;

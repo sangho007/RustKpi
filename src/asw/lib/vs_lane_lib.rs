@@ -1,16 +1,15 @@
 use opencv::{
-    core::{self, Scalar, Point, Point2f, Mat, Vector, Size, CV_8UC1, CV_8UC3, DECOMP_LU},
     core::AlgorithmHint::ALGO_HINT_DEFAULT,
+    core::{self, Mat, Point, Point2f, Scalar, Size, Vector, CV_8UC1, CV_8UC3, DECOMP_LU},
     highgui,
     imgproc,
     prelude::*,
     videoio,
     Result,
 };
+use rayon::prelude::*;
 use std::f64::consts::PI;
 use std::time::Instant;
-use opencv::gapi::blur;
-use rayon::prelude::*;
 
 /// 본 코드는 mode 값(CAM_MODE)을 통해 웹캠 혹은 동영상 파일을 선택하여 처리하도록 작성했습니다.
 /// 만약 `CAM_MODE == 1`이면 웹캠에서 실시간 영상을 읽고,

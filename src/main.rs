@@ -4,10 +4,9 @@ mod rte;
 mod bsw;
 mod asw;
 
-use std::sync::Arc;
-use opencv::highgui;
-use crate::rte::rte_dto::{VfbEvent};
 use crate::rte::rte_dto::*;
+use opencv::highgui;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> opencv::Result<()> {
