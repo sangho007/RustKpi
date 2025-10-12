@@ -5,12 +5,14 @@ edition = "2024"
 
 [dependencies]
 tokio = { version = "1.47.1", features = ["full"] }
-opencv = "0.94.2"
+opencv = "0.94.4"
 rayon = "1.11.0"
 hc-sr04 = "0.1.2"
 linux-embedded-hal = { version = "0.4", features = ["gpio_cdev"] }
 pwm-pca9685 = "1.0.0"
 dbscan = "0.3.1"
+pyo3 = "0.26.0"
+numpy = "0.26.0"
 
 [profile.release]
 opt-level = 3
