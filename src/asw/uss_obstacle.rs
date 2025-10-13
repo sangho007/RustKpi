@@ -1,31 +1,35 @@
 use crate::asw::lib::uss_lib::*;
-use crate::rte::rte_dto::{DtoUltraSonicObstacle, VfbEvent};
-use crate::rte::rte_main::{DebugSender, VfbSender};
+use crate::rte::rte_dto::DtoUltraSonicObstacle;
+use crate::rte::rte_main::UltrasonicChannels;
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
 
-pub async fn runnable_obstacle_detection(id: &'static str, tx: VfbSender, debug: DebugSender) {
-    let mut rx = tx.subscribe();
-    let mut alive_cnt = 0;
-    let mut detected;
-    let mut obstacle_dto;
-    let mut event;
+pub async fn runnable_obstacle_detection(id: &'static str, channels: UltrasonicChannels) {
+    let raw_tx = channels.raw_tx.clone();
+    let obstacle_tx = channels.obstacle_tx.clone();
+    let handle = tokio::task::spawn_blocking(move || {
+        let mut rx = raw_tx.subscribe();
+        let mut alive_cnt = 0;
 
-    loop {
-        match rx.recv().await {
-            Ok(VfbEvent::UltraSonicRawEvent(ultrasonic_dto)) => {
-                if ultrasonic_dto.distance < THRESHOLD_DISTANCE {detected = true;}
-                else {detected = false;}
+        loop {
+            match rx.blocking_recv() {
+                Ok(ultrasonic_dto) => {
+                    let detected = ultrasonic_dto.distance < THRESHOLD_DISTANCE;
+                    let obstacle_dto = Arc::new(DtoUltraSonicObstacle::new(detected, alive_cnt));
+                    let _ = obstacle_tx.send(obstacle_dto);
 
-                obstacle_dto = DtoUltraSonicObstacle::new(detected,alive_cnt);
-                event = VfbEvent::UltraSonicObstacleDetectedEvent(Arc::new(obstacle_dto));
-                let _ = tx.send(event.clone());
-                let _ = debug.send(event.clone());
-
-                alive_cnt += 1;
+                    alive_cnt += 1;
+                }
+                Err(RecvError::Lagged(n)) => {
+                    eprintln!("[{}] Ultrasound obstacle detector lagged by {}", id, n);
+                    continue;
+                }
+                Err(RecvError::Closed) => break,
             }
-            Err(RecvError::Lagged(n)) => { continue; }
-            _=> continue,
         }
+    });
+
+    if let Err(e) = handle.await {
+        eprintln!("[{}] Ultrasound obstacle detector join error: {}", id, e);
     }
 }

@@ -1,14 +1,14 @@
 // 파일명: ecu_abs_pca9685.rs
 
 use crate::bsw::lib::pca9685_lib::*;
-use crate::rte::rte_dto::VfbEvent;
-use crate::rte::rte_main::VfbSender;
+use crate::rte::rte_main::ControlChannels;
 use linux_embedded_hal::I2cdev;
+use std::time::{Duration, Instant};
 
 use pwm_pca9685::{Address, Channel, Pca9685};
-use tokio::sync::broadcast::error::RecvError;
+use tokio::{select, sync::broadcast::error::RecvError};
 
-pub async fn ea_pca9685_actuator(id: &'static str, tx: VfbSender) {
+pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
     // --- I2C 및 PCA9685 드라이버 초기화 ---
     let i2c_dev = match I2cdev::new(I2C_BUS) {
         Ok(dev) => dev,
@@ -49,61 +49,103 @@ pub async fn ea_pca9685_actuator(id: &'static str, tx: VfbSender) {
     }
 
     // 서보 초기화
-    let _ = pwm.set_channel_off(Channel::C0, angle_to_pwm(170));
-    let _ = pwm.set_channel_off(Channel::C1, angle_to_pwm(170));
-    let _ = pwm.set_channel_off(Channel::C2, angle_to_pwm(90));
+    let _ = pwm.set_channel_off(Channel::C0, angle_to_pwm(90));  // 바퀴 조향 
+    let _ = pwm.set_channel_off(Channel::C1, angle_to_pwm(180)); // 카메라 좌우
+    let _ = pwm.set_channel_off(Channel::C2, angle_to_pwm(170)); // 카메라 위아래
 
-    let mut rx = tx.subscribe();
+    let mut servo_rx = control.servo_tx.subscribe();
+    let mut dc_rx = control.dc_motor_tx.subscribe();
+    let mut servo_state: [Option<u32>; SERVO_CHANNELS.len()] = [Some(90), Some(180), Some(170)];
+    let mut last_servo_log = Instant::now();
+    let mut last_dc_state: Option<(u32, u32)> = None;
+    let mut last_dc_log = Instant::now();
+    const SERVO_LOG_INTERVAL: Duration = Duration::from_secs(1);
+    const DC_LOG_INTERVAL: Duration = Duration::from_secs(1);
 
     // --- 들어오는 명령어를 처리하는 메인 루프 ---
     loop {
-        match rx.recv().await {
-            // 서보 모터 제어 이벤트 처리
-            Ok(VfbEvent::ServoCtrlEvent(servo_dto)) => {
-                if let Some(&target_channel) = SERVO_CHANNELS.get(servo_dto.channel as usize) {
-                    let pwm_val = angle_to_pwm(servo_dto.angle);
-                    println!("[BSW] 서보 명령어 수신: 채널 {}, 각도 {}, PWM 설정 값 {}", servo_dto.channel, servo_dto.angle, pwm_val);
-                    if let Err(e) = pwm.set_channel_off(target_channel, pwm_val) {
-                        eprintln!("[BSW] 서보 채널 {:?} OFF 값 설정 실패: {:?}", target_channel, e);
+        select! {
+            servo_result = servo_rx.recv() => {
+                match servo_result {
+                    Ok(servo_dto) => {
+                        if let Some(&target_channel) = SERVO_CHANNELS.get(servo_dto.channel as usize) {
+                            let pwm_val = angle_to_pwm(servo_dto.angle);
+                            if let Err(e) = pwm.set_channel_off(target_channel, pwm_val) {
+                                eprintln!("[BSW] 서보 채널 {:?} OFF 값 설정 실패: {:?}", target_channel, e);
+                            }
+
+                            let idx = servo_dto.channel as usize;
+                            if let Some(state_slot) = servo_state.get_mut(idx) {
+                                let previous = *state_slot;
+                                *state_slot = Some(servo_dto.angle);
+                                if previous != Some(servo_dto.angle) || last_servo_log.elapsed() >= SERVO_LOG_INTERVAL {
+                                    let summary = servo_state.iter().enumerate()
+                                        .map(|(channel, angle)| match angle {
+                                            Some(a) => format!("C{}={}", channel, a),
+                                            None => format!("C{}=--", channel),
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    println!("[BSW] 서보 상태 요약: {}", summary);
+                                    last_servo_log = Instant::now();
+                                }
+                            }
+                        } else {
+                            eprintln!("[BSW] 잘못된 서보 채널 번호 수신: {}", servo_dto.channel);
+                        }
                     }
-                } else {
-                    eprintln!("[BSW] 잘못된 서보 채널 번호 수신: {}", servo_dto.channel);
+                    Err(RecvError::Lagged(n)) => {
+                        eprintln!("[{}] Servo command lagged by {}", id, n);
+                    }
+                    Err(RecvError::Closed) => {
+                        eprintln!("[{}] Servo command channel closed.", id);
+                        break;
+                    }
                 }
             }
+            dc_result = dc_rx.recv() => {
+                match dc_result {
+                    Ok(dcmotor_dto) => {
+                        match dcmotor_dto.direction {
+                            1 => { // 정방향
+                                motor_control(&mut pwm, Motor::M1, Direction::Forward, percent_to_pwm(dcmotor_dto.speed));
+                                motor_control(&mut pwm, Motor::M2, Direction::Forward, percent_to_pwm(dcmotor_dto.speed));
+                            },
+                            2 => { // 역방향
+                                motor_control(&mut pwm, Motor::M1, Direction::Backward, percent_to_pwm(dcmotor_dto.speed));
+                                motor_control(&mut pwm, Motor::M2, Direction::Backward, percent_to_pwm(dcmotor_dto.speed));
+                            },
+                            0 => { // 정지
+                                motor_stop(&mut pwm, Motor::M1);
+                                motor_stop(&mut pwm, Motor::M2);
+                            },
+                            _ => continue,
+                        }
 
-            // DC 모터 제어 이벤트 처리
-            Ok(VfbEvent::DcMotorCtrlEvent(dcmotor_dto)) => {
-                println!("[BSW] DC 모터 명령어 수신: 방향 {}, 속도 {}", dcmotor_dto.direction, dcmotor_dto.speed);
-
-                match dcmotor_dto.direction {
-                    1 => { // 정방향
-                        motor_control(&mut pwm, Motor::M1, Direction::Forward, percent_to_pwm(dcmotor_dto.speed)); // 최대 속도4095
-                        motor_control(&mut pwm, Motor::M2, Direction::Forward, percent_to_pwm(dcmotor_dto.speed));
-                    },
-                    2 => { // 역방향
-                        motor_control(&mut pwm, Motor::M1, Direction::Backward, percent_to_pwm(dcmotor_dto.speed));
-                        motor_control(&mut pwm, Motor::M2, Direction::Backward, percent_to_pwm(dcmotor_dto.speed));
-                    },
-                    0 => { // 정지
-                        motor_stop(&mut pwm, Motor::M1);
-                        motor_stop(&mut pwm, Motor::M2);
-                    },
-                    _ => continue,
+                        let current_state = (dcmotor_dto.direction, dcmotor_dto.speed);
+                        let state_changed = last_dc_state.map(|s| s != current_state).unwrap_or(true);
+                        if state_changed || last_dc_log.elapsed() >= DC_LOG_INTERVAL {
+                            println!(
+                                "[BSW] DC 모터 상태: 방향 {}, 속도 {}",
+                                current_state.0, current_state.1
+                            );
+                            last_dc_log = Instant::now();
+                        }
+                        last_dc_state = Some(current_state);
+                    }
+                    Err(RecvError::Lagged(n)) => {
+                        eprintln!("[{}] DC motor command lagged by {}", id, n);
+                    }
+                    Err(RecvError::Closed) => {
+                        eprintln!("[{}] DC motor command channel closed.", id);
+                        break;
+                    }
                 }
             }
-
-            Err(RecvError::Lagged(n)) => {
-                eprintln!("[{}] Error receiving event: Lagged by {}", id, n);
-                continue;
-            }
-            _ => { // 관심 없는 다른 VfbEvent는 무시
-                continue;
-            }
-        };
+        }
     }
 
     // 종료 시 PWM 컨트롤러를 정상적으로 비활성화
     // let _ = pwm.destroy();
     // println!("[BSW] PCA9685 서보 액추에이터가 종료되었습니다.");
 }
-

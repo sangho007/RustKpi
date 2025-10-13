@@ -94,10 +94,15 @@ pub fn motor_stop(
     let _ = pwm.set_channel_off(in2, 0);
 }
 
-pub fn percent_to_pwm(angle: u32) -> u16 {
-    // 안전을 위해 각도를 0-180도 범위로 제한
-    let clamped_angle = angle.clamp(0, 100);
-    // SERVO_MIN과 SERVO_MAX 사이를 선형 보간하여 PWM 값을 계산
-    let pwm_value = SERVO_MIN as f64 + (clamped_angle as f64 / 100.0) * (SERVO_MAX - SERVO_MIN) as f64;
-    pwm_value.round() as u16
+pub fn percent_to_pwm(percent: u32) -> u16 {
+    // 안전을 위해 입력 퍼센트를 0-100으로 제한
+    let clamped_percent = percent.clamp(0, 100);
+    // DC_MIN과 DC_MAX 사이를 선형 보간하여 PWM 값을 계산
+    let pwm_value = DC_MIN as f64
+        + (clamped_percent as f64 / 100.0) * (DC_MAX - DC_MIN) as f64;
+    // 계산된 값이 DC 범위를 벗어나지 않도록 한 번 더 클램프
+    let pwm_value = pwm_value.round();
+    pwm_value
+        .clamp(DC_MIN as f64, DC_MAX as f64)
+        as u16
 }

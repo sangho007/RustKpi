@@ -1,38 +1,62 @@
 use crate::asw::lib::vs_trafficlight_lib::*;
-use crate::rte::rte_dto::{DtoTrafficLight, VfbEvent};
-use crate::rte::rte_main::{DebugSender, VfbSender};
-use opencv::core::Mat;
+use crate::rte::rte_dto::DtoTrafficLight;
+use crate::rte::rte_main::CameraChannels;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::RecvError;
 
+pub async fn runnable_trafficlight_detection(
+    id: &'static str,
+    camera: CameraChannels,
+) -> opencv::Result<()> {
+    let raw_tx = camera.raw_tx.clone();
+    let traffic_tx = camera.traffic_light_tx.clone();
+    let join_result = tokio::task::spawn_blocking(move || -> opencv::Result<()> {
+        let mut rx = raw_tx.subscribe();
+        let mut alive_cnt = 0;
+        let mut pipeline = Pipeline::new();
+        let mut last_lag_log: Option<Instant> = None;
 
-pub async fn runnable_trafficlight_detection(id: &'static str, tx: VfbSender, debug: DebugSender) -> opencv::Result<Mat> {
-    let mut rx = tx.subscribe();
-    let mut alive_cnt = 0;
-    let mut trafficlight_dto;
-    let mut hsv;
-    let mut detected_color;
-    let mut event;
+        loop {
+            let mut cam_raw = match rx.blocking_recv() {
+                Ok(cam_dto) => cam_dto, // 처리할 데이터만 추출
+                Err(RecvError::Lagged(n)) => {
+                    if last_lag_log
+                        .map(|t| t.elapsed() > Duration::from_secs(1))
+                        .unwrap_or(true)
+                    {
+                        eprintln!("[{}] Traffic light detector lagged by {}", id, n);
+                        last_lag_log = Some(Instant::now());
+                    }
+                    continue;
+                }
+                Err(RecvError::Closed) => break,
+            };
 
-    let mut pipeline = Pipeline::new();
+            // 최신 프레임만 처리하도록 버퍼를 비웁니다.
+            while let Ok(newer) = rx.try_recv() {
+                cam_raw = newer;
+            }
 
-    loop {
-        let cam_raw = match rx.recv().await {
-            Ok(VfbEvent::CamRawEvent(cam_dto)) => cam_dto, // 처리할 데이터만 추출
-            Err(RecvError::Lagged(n)) => { continue; }
-            _ => { continue; } // 관심 없는 이벤트는 무시
-        };
+            let hsv = pipeline.convert_to_hsv(&cam_raw.img)?;
+            let detected_color = pipeline.detect_color_from_hsv(&hsv);
 
-        hsv = pipeline.convert_to_hsv(&cam_raw.img)?;
-        detected_color = pipeline.detect_color_from_hsv(&hsv);
+            // 3. 결과 전송
+            let trafficlight_dto = Arc::new(DtoTrafficLight::new(detected_color, alive_cnt));
+            let _ = traffic_tx.send(trafficlight_dto);
 
-        // 3. 결과 전송
-        trafficlight_dto = DtoTrafficLight::new(detected_color, alive_cnt);
-        event = VfbEvent::CamTrafficLightEvent(Arc::new(trafficlight_dto));
+            alive_cnt += 1;
+        }
 
-        let _ = tx.send(event.clone());
-        let _ = debug.send(event.clone());
+        Ok(())
+    })
+    .await
+    .map_err(|e| {
+        opencv::Error::new(
+            opencv::core::StsError,
+            format!("Traffic light task join error: {}", e),
+        )
+    })?;
 
-        alive_cnt += 1;
-    }
+    join_result
 }
