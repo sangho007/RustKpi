@@ -5,6 +5,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::RecvError;
 
+const TRAFFIC_DETECTION_INTERVAL: u32 = 5;
+
 pub async fn runnable_trafficlight_detection(
     id: &'static str,
     camera: CameraChannels,
@@ -16,6 +18,7 @@ pub async fn runnable_trafficlight_detection(
         let mut alive_cnt = 0;
         let mut pipeline = Pipeline::new();
         let mut last_lag_log: Option<Instant> = None;
+        let mut last_detected_color = TrafficLightColor::Off;
 
         loop {
             let mut cam_raw = match rx.blocking_recv() {
@@ -38,11 +41,17 @@ pub async fn runnable_trafficlight_detection(
                 cam_raw = newer;
             }
 
-            let hsv = pipeline.convert_to_hsv(&cam_raw.img)?;
-            let detected_color = pipeline.detect_color_from_hsv(&hsv);
+            let should_detect =
+                (alive_cnt % TRAFFIC_DETECTION_INTERVAL == 0) || matches!(last_detected_color, TrafficLightColor::Off);
+            if should_detect {
+                let hsv = pipeline.convert_to_hsv(&cam_raw.img)?;
+                let detected_color = pipeline.detect_color_from_hsv(&hsv);
+                last_detected_color = detected_color;
+            }
 
             // 3. 결과 전송
-            let trafficlight_dto = Arc::new(DtoTrafficLight::new(detected_color, alive_cnt));
+            let trafficlight_dto =
+                Arc::new(DtoTrafficLight::new(last_detected_color.clone(), alive_cnt));
             let _ = traffic_tx.send(trafficlight_dto);
 
             alive_cnt += 1;

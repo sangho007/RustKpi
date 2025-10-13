@@ -22,12 +22,6 @@ const CAM_MODE: i32 = 1;
 /// 되돌려주는 번거로움을 줄여줍니다.
 pub type LaneDetectionResult<T> = Result<T>;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum LaneDetectionMode {
-    SlidingWindow,
-    Hough,
-}
-
 /// OpenCV를 이용해 차선 검출을 수행하는 핵심 파이프라인 구조체입니다.
 ///
 /// # 주요 멤버
@@ -106,8 +100,6 @@ pub struct Pipeline {
     kalman_process_noise: f64,
     /// 칼만 필터 측정 노이즈
     kalman_measurement_noise: f64,
-    /// 차선 검출 모드
-    detection_mode: LaneDetectionMode,
     /// 칼만 필터 사용 여부
     use_kalman_filter: bool,
 }
@@ -132,7 +124,7 @@ impl Pipeline {
     /// # C/C++ 대비 Rust 문법 장점
     /// - `Result`와 `?` 연산자를 통해 에러를 핸들링하며, 예외(exception)가 없어
     ///   제어 흐름이 더 명시적이고 예측 가능합니다.
-    pub fn new_with_settings(mode: LaneDetectionMode, use_kalman_filter: bool) -> Result<Self> {
+    pub fn new_with_settings(use_kalman_filter: bool) -> Result<Self> {
         let width = 1280;
         let height = 720;
 
@@ -217,19 +209,13 @@ impl Pipeline {
             kalman_covariance: 1.0,
             kalman_process_noise: 0.01,
             kalman_measurement_noise: 0.5,
-            detection_mode: mode,
             use_kalman_filter,
         })
     }
 
     /// 기본 설정(슬라이딩 윈도우 + 칼만 필터 비사용)으로 파이프라인을 생성합니다.
     pub fn new() -> Result<Self> {
-        Self::new_with_settings(LaneDetectionMode::SlidingWindow, false)
-    }
-
-    /// 현재 설정된 차선 검출 모드를 반환합니다.
-    pub fn detection_mode(&self) -> LaneDetectionMode {
-        self.detection_mode
+        Self::new_with_settings(false)
     }
 
     /// 칼만 필터 사용 여부를 반환합니다.
@@ -309,178 +295,6 @@ impl Pipeline {
         let mut edges = Mat::default();
         imgproc::canny(img, &mut edges, 200.0, 350.0, 3, false)?;
         Ok(edges)
-    }
-
-    /// 허프 변환 기반으로 차선 후보 선분을 검출합니다.
-    ///
-    /// # Arguments
-    /// * `edges` - 캐니 등으로 얻은 이진 엣지 영상
-    ///
-    /// # Returns
-    /// 감지된 선분들의 (시작점, 끝점) 목록. 선분이 없으면 빈 벡터를 반환합니다.
-    pub fn detect_lane_lines_hough(&self, edges: &Mat) -> Result<Vec<(Point, Point)>> {
-        let mut lines: Vector<core::Vec4i> = Vector::new();
-        imgproc::hough_lines_p(
-            edges,
-            &mut lines,
-            1.0,
-            std::f64::consts::PI / 180.0,
-            50,
-            50.0,
-            20.0,
-        )?;
-
-        let mut segments = Vec::with_capacity(lines.len());
-        for line in lines.iter() {
-            let x1 = line[0];
-            let y1 = line[1];
-            let x2 = line[2];
-            let y2 = line[3];
-            segments.push((Point::new(x1, y1), Point::new(x2, y2)));
-        }
-        Ok(segments)
-    }
-
-    /// 허프 변환 결과를 보기 쉽게 그려주는 보조 함수입니다.
-    pub fn draw_hough_lines(&self, src: &Mat, segments: &[(Point, Point)]) -> Result<Mat> {
-        let mut canvas = src.clone();
-        for (start, end) in segments {
-            imgproc::line(
-                &mut canvas,
-                *start,
-                *end,
-                Scalar::new(0.0, 0.0, 255.0, 255.0),
-                2,
-                imgproc::LINE_AA,
-                0,
-            )?;
-        }
-        Ok(canvas)
-    }
-
-    /// 허프 변환으로 얻은 선분을 이용해 조향각을 추정합니다.
-    ///
-    /// 성공적으로 각도를 계산하면 내부 상태(`prev_angle`, `steering_angle`)도 갱신합니다.
-    pub fn estimate_angle_from_hough(&mut self, segments: &[(Point, Point)]) -> Option<f64> {
-        if segments.is_empty() {
-            return None;
-        }
-
-        let mut left_weight = 0.0;
-        let mut left_slope_acc = 0.0;
-        let mut left_intercept_acc = 0.0;
-        let mut right_weight = 0.0;
-        let mut right_slope_acc = 0.0;
-        let mut right_intercept_acc = 0.0;
-
-        for (start, end) in segments {
-            let dx = (end.x - start.x) as f64;
-            let dy = (end.y - start.y) as f64;
-            if dx.abs() < 1.0 {
-                continue;
-            }
-
-            let slope = dy / dx;
-            if slope.abs() < 0.1 {
-                continue;
-            }
-
-            let intercept = start.y as f64 - slope * start.x as f64;
-            let weight = (dx * dx + dy * dy).sqrt();
-
-            if slope < 0.0 {
-                left_weight += weight;
-                left_slope_acc += slope * weight;
-                left_intercept_acc += intercept * weight;
-            } else {
-                right_weight += weight;
-                right_slope_acc += slope * weight;
-                right_intercept_acc += intercept * weight;
-            }
-        }
-
-        if left_weight <= std::f64::EPSILON || right_weight <= std::f64::EPSILON {
-            return None;
-        }
-
-        let left_slope = left_slope_acc / left_weight;
-        let left_intercept = left_intercept_acc / left_weight;
-        let right_slope = right_slope_acc / right_weight;
-        let right_intercept = right_intercept_acc / right_weight;
-
-        if !left_slope.is_finite()
-            || !left_intercept.is_finite()
-            || !right_slope.is_finite()
-            || !right_intercept.is_finite()
-        {
-            return None;
-        }
-
-        if left_slope.abs() < 1e-6 || right_slope.abs() < 1e-6 {
-            return None;
-        }
-
-        let bottom_y = self.height as f64;
-        let left_bottom = (bottom_y - left_intercept) / left_slope;
-        let right_bottom = (bottom_y - right_intercept) / right_slope;
-
-        if !left_bottom.is_finite() || !right_bottom.is_finite() {
-            return None;
-        }
-
-        if left_bottom >= right_bottom {
-            return None;
-        }
-
-        let slope = if (left_slope - right_slope).abs() < 1e-3 {
-            let avg_slope = (left_slope + right_slope) / 2.0;
-            if avg_slope.abs() < 1e-6 {
-                return None;
-            }
-            let avg_intercept = (left_intercept + right_intercept) / 2.0;
-            let inter_x = -avg_intercept / avg_slope;
-            let inter_y = 0.0;
-            let dx = (self.width as f64 / 2.0) - inter_x;
-            let dy = (self.height as f64) - inter_y;
-            if dx.abs() < 1e-3 {
-                0.0
-            } else {
-                dy / dx
-            }
-        } else {
-            let inter_x = (right_intercept - left_intercept) / (left_slope - right_slope);
-            let inter_y = left_slope * inter_x + left_intercept;
-            let dx = (self.width as f64 / 2.0) - inter_x;
-            let dy = (self.height as f64) - inter_y;
-            if dx.abs() < 1e-3 {
-                0.0
-            } else {
-                dy / dx
-            }
-        };
-
-        if !slope.is_finite() {
-            return None;
-        }
-
-        let mut steering_angle = slope.atan() * 180.0 / PI;
-        if steering_angle > 0.0 {
-            steering_angle -= 90.0;
-            if steering_angle <= -20.0 {
-                steering_angle = -20.0;
-            }
-        } else if steering_angle < 0.0 {
-            steering_angle += 90.0;
-            if steering_angle >= 20.0 {
-                steering_angle = 20.0;
-            }
-        } else {
-            steering_angle = 0.0;
-        }
-
-        self.prev_angle = steering_angle;
-        self.steering_angle = steering_angle;
-        Some(steering_angle)
     }
 
     /// 모폴로지 닫힘(Closing) 연산을 적용하여 엣지 사이 간격을 메우고 잡음 제거.
@@ -995,17 +809,18 @@ impl Pipeline {
             mean_of_last_10(&self.right_c),
         ];
 
-        // -------------------------------------------
-        // 2) row별로 0이 아닌 x좌표 미리 분류
-        // -------------------------------------------
-        let nonzero_points_by_row = get_nonzero_points_by_row(binary_img)?;
         let (height, width) = (binary_img.rows(), binary_img.cols());
+        let width_i32 = width;
+        let step = binary_img.step1(0)? as usize;
+        let data = binary_img.data_bytes()?;
 
         // -------------------------------------------
         // 3) 이전 차선 주변의 픽셀들만 선택
         // -------------------------------------------
-        let mut left_lane_points: Vec<(i32, i32)> = Vec::new();
-        let mut right_lane_points: Vec<(i32, i32)> = Vec::new();
+        let approx_capacity =
+            (height.max(1) as usize).saturating_mul(margin.max(1) as usize);
+        let mut left_lane_points: Vec<(i32, i32)> = Vec::with_capacity(approx_capacity);
+        let mut right_lane_points: Vec<(i32, i32)> = Vec::with_capacity(approx_capacity);
 
         for y in 0..height {
             let y_f64 = y as f64;
@@ -1014,18 +829,34 @@ impl Pipeline {
             let rightx_center =
                 right_fit_avg[0] * y_f64 * y_f64 + right_fit_avg[1] * y_f64 + right_fit_avg[2];
 
-            let left_search_low = (leftx_center - margin as f64) as i32;
-            let left_search_high = (leftx_center + margin as f64) as i32;
-            let right_search_low = (rightx_center - margin as f64) as i32;
-            let right_search_high = (rightx_center + margin as f64) as i32;
+            let left_search_low = (leftx_center - margin as f64).floor() as i32;
+            let left_search_high = (leftx_center + margin as f64).ceil() as i32;
+            let right_search_low = (rightx_center - margin as f64).floor() as i32;
+            let right_search_high = (rightx_center + margin as f64).ceil() as i32;
 
-            let row_nonzeros = &nonzero_points_by_row[y as usize];
-            for &x in row_nonzeros {
-                if x >= left_search_low && x < left_search_high {
-                    left_lane_points.push((y, x));
+            let row_start = y as usize * step;
+            let row_slice = &data[row_start..row_start + step];
+            let usable_width = width_i32.min(step as i32);
+
+            let left_low = left_search_low.clamp(0, usable_width);
+            let left_high = left_search_high.clamp(0, usable_width);
+            if left_low < left_high {
+                let slice = &row_slice[left_low as usize..left_high as usize];
+                for (offset, &pixel) in slice.iter().enumerate() {
+                    if pixel != 0 {
+                        left_lane_points.push((y, left_low + offset as i32));
+                    }
                 }
-                if x >= right_search_low && x < right_search_high {
-                    right_lane_points.push((y, x));
+            }
+
+            let right_low = right_search_low.clamp(0, usable_width);
+            let right_high = right_search_high.clamp(0, usable_width);
+            if right_low < right_high {
+                let slice = &row_slice[right_low as usize..right_high as usize];
+                for (offset, &pixel) in slice.iter().enumerate() {
+                    if pixel != 0 {
+                        right_lane_points.push((y, right_low + offset as i32));
+                    }
                 }
             }
         }
@@ -1739,9 +1570,9 @@ fn mean_of_last_10(vec: &Vec<f64>) -> f64 {
     if len == 0 {
         return 0.0;
     }
-    let start = if len > 10 { len - 10 } else { 0 };
+    let start = len.saturating_sub(10);
     let slice = &vec[start..];
-    let sum: f64 = slice.par_iter().sum();
+    let sum: f64 = slice.iter().sum();
     sum / (slice.len() as f64)
 }
 
@@ -1807,12 +1638,11 @@ fn get_nonzero_points_by_row(binary_img: &Mat) -> Result<Vec<Vec<i32>>> {
 
 #[derive(Clone, Copy, Debug)]
 pub struct LaneTaskConfig {
-    pub mode: LaneDetectionMode,
     pub use_kalman: bool,
 }
 
 impl LaneTaskConfig {
-    pub fn new(mode: LaneDetectionMode, use_kalman: bool) -> Self {
-        Self { mode, use_kalman }
+    pub fn new(use_kalman: bool) -> Self {
+        Self { use_kalman }
     }
 }
