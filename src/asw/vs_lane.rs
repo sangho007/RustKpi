@@ -38,12 +38,6 @@ pub async fn runnable_pre_processing(
                 Err(RecvError::Closed) => break,
             };
 
-            // 가능한 한 최신 프레임만 사용하도록 큐를 비워서 가장 최근 값을 유지합니다.
-            let mut cam_raw = cam_raw;
-            while let Ok(newer) = rx.try_recv() {
-                cam_raw = newer;
-            }
-
             let should_process =
                 (alive_cnt % PROCESS_INTERVAL == 0) || last_processed_frame.is_none();
 
@@ -123,11 +117,6 @@ pub async fn runnable_get_lane_angle(
                 }
                 Err(RecvError::Closed) => break,
             };
-
-            let mut cam_processed = cam_processed;
-            while let Ok(newer) = rx.try_recv() {
-                cam_processed = newer;
-            }
 
             let should_process =
                 (alive_cnt % PROCESS_INTERVAL == 0) || last_birds_eye.is_none();
