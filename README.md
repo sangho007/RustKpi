@@ -18,7 +18,7 @@
 ## 시스템 아키텍처
 ```
 ┌────────────────────────────────────┐
-│   Application Software (ASW)       │  Lane/Vision, Traffic Light, Obstacle
+│   Application Software (ASW)       │  Lane/Vision, Traffic Light, Foward Collision
 ├────────────────────────────────────┤
 │   Runtime Environment (RTE)        │  DTO, Broadcast Channel, Scheduling
 ├────────────────────────────────────┤
@@ -28,7 +28,7 @@
 
 | 계층 | 주요 모듈 | 경로 |
 | --- | --- | --- |
-| ASW | `vs_lane`, `vs_trafficlight`, `uss_obstacle` | `src/asw/` |
+| ASW | `vs_lane`, `vs_trafficlight`, `uss_forwardcollision` | `src/asw/` |
 | RTE | `rte_main`, `rte_dto` | `src/rte/` |
 | BSW | `ecu_abs_cam`, `ecu_abs_ultrasonic`, `ecu_abs_pca9685`, `pca9685_lib` | `src/bsw/` |
 
