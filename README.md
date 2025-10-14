@@ -32,6 +32,31 @@
 | RTE | `rte_main`, `rte_dto` | `src/rte/` |
 | BSW | `ecu_abs_cam`, `ecu_abs_ultrasonic`, `ecu_abs_pca9685`, `pca9685_lib` | `src/bsw/` |
 
+```
+src
+├── asw
+│   ├── lib
+│   │   ├── uss_lib.rs
+│   │   ├── vs_lane_lib.rs
+│   │   └── vs_trafficlight_lib.rs
+│   ├── uss_forwardcollision.rs
+│   ├── vs_lane.rs
+│   └── vs_trafficlight.rs
+├── bsw
+│   ├── lib
+│   │   ├── cam_lib.rs
+│   │   ├── pca9685_lib.rs
+│   │   └── ultrasonic_lib.rs
+│   ├── ecu_abs_cam.rs
+│   ├── ecu_abs_pca9685.rs
+│   ├── ecu_abs_ultrasonic.rs
+├── rte
+│   ├── rte_dto.rs
+│   └── rte_main.rs
+└── main.rs
+
+```
+
 ## AUTOSAR 적용 범위 & VFB 중심 접근
 - **Virtual Functional Bus(VFB)**: RTE와 DTO를 통해 소프트웨어 컴포넌트 간 인터페이스를 정형화하고, 실제 MCAL 부재 상황에서도 기능 검증이 가능하도록 했습니다.
 - **AUTOSAR 스택 단순화**: Classic AUTOSAR의 전체 스택을 구현하지 않고, 실험에 필요한 계층만 선별 적용했습니다. VFB와 BSW-ECU Abstraction에 집중하며, Complex Device Driver나 Diagnostics 등은 TODO로 남겨둡니다.
@@ -66,11 +91,11 @@ Broadcast 채널을 활용하여 각 Task가 비동기적으로 데이터를 주
 - **통합 실행 (`src/main.rs`)**  
   시스템 초기화, Task 생성, 디버깅용 GUI (OpenCV HighGUI).
 
-## 하드웨어 구성 (예정)
+## 하드웨어 구성
 - Raspberry Pi 4B (64-bit OS)
 - RC 카 섀시 및 DC 모터, 스티어링 서보
 - 카메라 모듈 (ov5647)
-- HC-SR04 등 초음파 센서 2~4개
+- HC-SR04 초음파 센서 
 - PCA9685 PWM 보드 + I2C 배선
 - 보조 전원 (모터 전용 배터리, 라즈베리파이 전원)
 
