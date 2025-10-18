@@ -187,6 +187,11 @@ pub mod libcamera_capture {
 
     impl LibcameraCapture {
         pub fn new(width: u32, height: u32, fps: u32) -> Result<Self> {
+            println!(
+                "[bsw][libcamera] new() requested width={} height={} fps={}",
+                width, height, fps
+            );
+
             let mut stride = 0u32;
             let mut bpp = 0u32;
             let mut err_buf = [0 as c_char; ERR_BUF_LEN];
@@ -212,6 +217,10 @@ pub mod libcamera_capture {
                 } else {
                     msg
                 };
+                eprintln!(
+                    "[bsw][libcamera] bridge_create failed: {} (width={} height={} fps={})",
+                    msg, width, height, fps
+                );
                 return Err(opencv_err(msg));
             }
 
