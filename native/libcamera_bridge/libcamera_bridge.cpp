@@ -154,9 +154,13 @@ bool CameraBridge::init(uint32_t width,
         attempt_stream_cfg.size.width = candidate.width;
         attempt_stream_cfg.size.height = candidate.height;
         attempt_stream_cfg.pixelFormat = candidate.format;
-        attempt_stream_cfg.bufferCount = std::max(attempt_stream_cfg.bufferCount, 4U);
+        attempt_stream_cfg.bufferCount = std::max(attempt_stream_cfg.bufferCount, 2U);
 
-        attempt_config->validate();
+        auto status = attempt_config->validate();
+        if (status == libcamera::CameraConfiguration::Invalid) {
+            std::fprintf(stderr, "[libcamera_bridge] validate returned Invalid\n");
+            continue;
+        }
 
         std::fprintf(stderr,
                      "[libcamera_bridge] validated stream: %s\n",
@@ -174,8 +178,11 @@ bool CameraBridge::init(uint32_t width,
         }
 
         auto attempt_allocator = std::make_unique<libcamera::FrameBufferAllocator>(camera_);
-        if (attempt_allocator->allocate(attempt_stream)) {
-            std::fprintf(stderr, "[libcamera_bridge] allocate failed\n");
+        int alloc_rc = attempt_allocator->allocate(attempt_stream);
+        if (alloc_rc) {
+            std::fprintf(stderr,
+                         "[libcamera_bridge] allocate failed rc=%d\n",
+                         alloc_rc);
             continue;
         }
 
