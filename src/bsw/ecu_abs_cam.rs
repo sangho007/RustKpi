@@ -13,7 +13,7 @@ pub async fn ea_cam_provider(camera: CameraChannels) -> Result<()> {
         let mut alive_cnt = 0;
         
         // 비디오 파일이나 카메라 장치를 엽니다.
-        let cammode = false;
+        let cammode = true;
         let mut cap: Box<dyn cam_lib::FrameCapture> = if cammode {
             // videoio::VideoCapture::new(0, videoio::CAP_ANY)?
             let picam = cam_lib::picamera_capture::PiCamera2::new(640, 480)
