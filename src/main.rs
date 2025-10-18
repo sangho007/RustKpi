@@ -20,32 +20,32 @@ async fn main() -> opencv::Result<()> {
 
     // BSW Task 생성
     tokio::spawn(bsw::ecu_abs_cam::ea_cam_provider(camera_channels.clone()));
-    tokio::spawn(bsw::ecu_abs_ultrasonic::ea_ultrasonic_provider(
-        ultrasonic_channels.clone(),
-    ));
-    tokio::spawn(bsw::ecu_abs_pwm::ea_pca9685_actuator(
-        "MotorControl",
-        control_channels.clone(),
-    ));
+    // tokio::spawn(bsw::ecu_abs_ultrasonic::ea_ultrasonic_provider(
+    //     ultrasonic_channels.clone(),
+    // ));
+    // tokio::spawn(bsw::ecu_abs_pwm::ea_pca9685_actuator(
+    //     "MotorControl",
+    //     control_channels.clone(),
+    // ));
 
 
     // ASW Task 생성
-    tokio::spawn(asw::vs_lane::runnable_pre_processing(
-        "PreProcess",
-        camera_channels.clone(),
-    ));
-    tokio::spawn(asw::vs_lane::runnable_get_lane_angle(
-        "LaneAngle",
-        camera_channels.clone(),
-    ));
-    tokio::spawn(asw::forwardcollision_ultrasonic::runnable_obstacle_detection(
-        "UssObstacle",
-        ultrasonic_channels.clone(),
-    ));
-    tokio::spawn(asw::vs_trafficlight::runnable_trafficlight_detection(
-        "TrafficLightDetection",
-        camera_channels.clone(),
-    ));
+    // tokio::spawn(asw::vs_lane::runnable_pre_processing(
+    //     "PreProcess",
+    //     camera_channels.clone(),
+    // ));
+    // tokio::spawn(asw::vs_lane::runnable_get_lane_angle(
+    //     "LaneAngle",
+    //     camera_channels.clone(),
+    // ));
+    // tokio::spawn(asw::forwardcollision_ultrasonic::runnable_obstacle_detection(
+    //     "UssObstacle",
+    //     ultrasonic_channels.clone(),
+    // ));
+    // tokio::spawn(asw::vs_trafficlight::runnable_trafficlight_detection(
+    //     "TrafficLightDetection",
+    //     camera_channels.clone(),
+    // ));
 
 
 
