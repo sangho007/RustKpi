@@ -179,12 +179,15 @@ bool CameraBridge::init(uint32_t width,
 
         auto attempt_allocator = std::make_unique<libcamera::FrameBufferAllocator>(camera_);
         int alloc_rc = attempt_allocator->allocate(attempt_stream);
-        if (alloc_rc) {
+        if (alloc_rc < 0) {
             std::fprintf(stderr,
                          "[libcamera_bridge] allocate failed rc=%d\n",
                          alloc_rc);
             continue;
         }
+        std::fprintf(stderr,
+                     "[libcamera_bridge] allocate succeeded buffers=%d\n",
+                     alloc_rc);
 
         const auto &frame_buffers = attempt_allocator->buffers(attempt_stream);
         if (frame_buffers.empty()) {
