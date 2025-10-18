@@ -1,12 +1,10 @@
 pub mod picamera_capture {
     use opencv::core::{Mat, Mat_AUTO_STEP, CV_8UC3};
-    use opencv::{prelude::*, videoio, Result};
+    use pyo3::exceptions::PyRuntimeError;
     use pyo3::prelude::*;
     use pyo3::types::PyDict;
-    use numpy::{PyArrayMethods};
-    use pyo3::exceptions::PyRuntimeError;
+    use numpy::PyArrayMethods;
     use std::ffi::c_void;
-    use crate::bsw::lib::cam_lib;
 
     pub const CAM_MODE: i32 = 1;
 
@@ -89,11 +87,9 @@ pub mod picamera_capture {
         }
     }
 }
-// ===================================================================
-// 2. 공통 인터페이스를 위한 Trait 정의 및 구현
-// ===================================================================
 use opencv::core::Mat;
-use opencv::{prelude::*,videoio,Result};
+use opencv::prelude::{MatTraitConst, VideoCaptureTrait, VideoCaptureTraitConst};
+use opencv::{videoio, Result};
 
 /// 프레임을 읽어오는 동작을 추상화하는 Trait
 pub trait FrameCapture: Send {
@@ -103,7 +99,7 @@ pub trait FrameCapture: Send {
 // 기존 `videoio::VideoCapture`에 대해 Trait 구현
 impl FrameCapture for videoio::VideoCapture {
     fn read_frame(&mut self, frame: &mut Mat) -> Result<bool> {
-        videoio::VideoCapture::read(self, frame)
+        VideoCaptureTrait::read(self, frame)
     }
 }
 
@@ -129,4 +125,191 @@ impl FrameCapture for picamera_capture::PiCamera2 {
             }
         }
     }
+}
+
+impl FrameCapture for libcamera_capture::LibcameraCapture {
+    fn read_frame(&mut self, frame: &mut Mat) -> Result<bool> {
+        self.capture_into(frame)
+    }
+}
+pub mod libcamera_capture {
+    use opencv::core::{AlgorithmHint, Mat, CV_8UC3};
+    use opencv::imgproc;
+    use opencv::prelude::MatTrait;
+    use opencv::{Error, Result};
+    use std::cmp;
+    use std::ffi::{c_char, c_void, CStr};
+    use std::ptr::NonNull;
+
+    #[repr(C)]
+    struct LibcameraBridgeOpaque {
+        _private: [u8; 0],
+    }
+
+    unsafe extern "C" {
+        fn libcamera_bridge_create(
+            width: u32,
+            height: u32,
+            fps: u32,
+            out_stride: *mut u32,
+            out_bpp: *mut u32,
+            err_buf: *mut c_char,
+            err_len: usize,
+        ) -> *mut LibcameraBridgeOpaque;
+
+        fn libcamera_bridge_capture(
+            handle: *mut LibcameraBridgeOpaque,
+            buffer: *mut u8,
+            buffer_len: usize,
+            out_size: *mut usize,
+            timestamp_ns: *mut u64,
+            err_buf: *mut c_char,
+            err_len: usize,
+        ) -> i32;
+
+        fn libcamera_bridge_destroy(handle: *mut LibcameraBridgeOpaque);
+    }
+
+    const ERR_BUF_LEN: usize = 256;
+
+    fn opencv_err(msg: impl Into<String>) -> Error {
+        Error::new(opencv::core::StsError, msg.into())
+    }
+
+    pub struct LibcameraCapture {
+        handle: NonNull<LibcameraBridgeOpaque>,
+        width: u32,
+        height: u32,
+        stride: usize,
+        bytes_per_pixel: usize,
+        buffer: Vec<u8>,
+    }
+
+    impl LibcameraCapture {
+        pub fn new(width: u32, height: u32, fps: u32) -> Result<Self> {
+            let mut stride = 0u32;
+            let mut bpp = 0u32;
+            let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+
+            let handle = unsafe {
+                libcamera_bridge_create(
+                    width,
+                    height,
+                    fps,
+                    &mut stride as *mut u32,
+                    &mut bpp as *mut u32,
+                    err_buf.as_mut_ptr(),
+                    ERR_BUF_LEN,
+                )
+            };
+
+            if handle.is_null() {
+                let msg = unsafe { CStr::from_ptr(err_buf.as_ptr()) }
+                    .to_string_lossy()
+                    .into_owned();
+                let msg = if msg.is_empty() {
+                    "Failed to initialize libcamera bridge".to_string()
+                } else {
+                    msg
+                };
+                return Err(opencv_err(msg));
+            }
+
+            let stride_usize = stride as usize;
+            let bytes_per_pixel = cmp::max(1usize, bpp as usize);
+            let buffer_len = stride_usize
+                .checked_mul(height as usize)
+                .ok_or_else(|| opencv_err("libcamera buffer size overflow"))?;
+            let buffer = vec![0u8; buffer_len];
+
+            Ok(Self {
+                handle: unsafe { NonNull::new_unchecked(handle) },
+                width,
+                height,
+                stride: stride_usize,
+                bytes_per_pixel,
+                buffer,
+            })
+        }
+
+        pub fn capture_into(&mut self, frame: &mut Mat) -> Result<bool> {
+            let mut out_size = 0usize;
+            let mut timestamp_ns = 0u64;
+            let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+
+            let rc = unsafe {
+                libcamera_bridge_capture(
+                    self.handle.as_ptr(),
+                    self.buffer.as_mut_ptr(),
+                    self.buffer.len(),
+                    &mut out_size as *mut usize,
+                    &mut timestamp_ns as *mut u64,
+                    err_buf.as_mut_ptr(),
+                    ERR_BUF_LEN,
+                )
+            };
+
+            if rc != 0 {
+                let msg = unsafe { CStr::from_ptr(err_buf.as_ptr()) }
+                    .to_string_lossy()
+                    .into_owned();
+                let msg = if msg.is_empty() {
+                    format!("libcamera capture failed (code {})", rc)
+                } else {
+                    msg
+                };
+                return Err(opencv_err(msg));
+            }
+
+            if out_size == 0 {
+                return Ok(false);
+            }
+
+            if self.bytes_per_pixel != 3 {
+                return Err(opencv_err(format!(
+                    "Unsupported pixel size from libcamera: {} bytes",
+                    self.bytes_per_pixel
+                )));
+            }
+
+            let mut rgb_mat = unsafe {
+                Mat::new_rows_cols_with_data_unsafe(
+                    self.height as i32,
+                    self.width as i32,
+                    CV_8UC3,
+                    self.buffer.as_mut_ptr() as *mut c_void,
+                    self.stride,
+                )?
+            };
+
+            imgproc::cvt_color(
+                &rgb_mat,
+                frame,
+                imgproc::COLOR_RGB2BGR,
+                0,
+                AlgorithmHint::ALGO_HINT_DEFAULT,
+            )?;
+
+            // Ensure we release the reference before the next capture.
+            unsafe {
+                rgb_mat.release()?;
+            }
+
+            Ok(true)
+        }
+
+        pub fn dimensions(&self) -> (u32, u32) {
+            (self.width, self.height)
+        }
+    }
+
+    impl Drop for LibcameraCapture {
+        fn drop(&mut self) {
+            unsafe {
+                libcamera_bridge_destroy(self.handle.as_ptr());
+            }
+        }
+    }
+
+    unsafe impl Send for LibcameraCapture {}
 }

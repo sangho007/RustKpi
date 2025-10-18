@@ -6,11 +6,13 @@ version = 4
 name = "RustKpi"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "dbscan",
  "hc-sr04",
  "linux-embedded-hal",
  "numpy",
  "opencv",
+ "pkg-config",
  "pwm-pca9685",
  "pyo3",
  "rayon",
