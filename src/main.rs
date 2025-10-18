@@ -52,7 +52,7 @@ async fn main() -> opencv::Result<()> {
     // 디버깅용 코드
     println!("== 시스템 실행 중... (GUI 창에서 'q'를 누르면 종료) ==");
 
-    const DEBUG_ON:bool = false;
+    const DEBUG_ON:bool = true;
 
     
     let mut processed_rx = camera_channels.processed_tx.subscribe();
