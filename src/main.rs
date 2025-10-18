@@ -58,6 +58,7 @@ async fn main() -> opencv::Result<()> {
     let mut processed_rx = camera_channels.processed_tx.subscribe();
     let mut birds_eye_rx = camera_channels.bird_eye_tx.subscribe();
     let mut lane_angle_rx = camera_channels.lane_angle_tx.subscribe();
+    let mut distance_rx = ultrasonic_channels.raw_tx.subscribe();
 
     // GUI를 위한 윈도우 생성
     highgui::named_window("CAM View", highgui::WINDOW_AUTOSIZE)?;
@@ -105,6 +106,18 @@ async fn main() -> opencv::Result<()> {
                     break 'main_loop;
                 }
             },
+            result = distance_rx.recv() => match result {
+                Ok(distance) => {
+                    println!("distance: {}, alive_cnt: {}", distance.distance, distance.alive_cnt);
+                }
+                Err(RecvError::Lagged(n)) => {
+                    eprintln!("[MAIN] Uss lagged by {}", n);
+                }
+                Err(RecvError::Closed) => {
+                    eprintln!("[MAIN] Uss angle channel closed.");
+                    break 'main_loop;
+                }
+            }
         }
         
         if DEBUG_ON {
