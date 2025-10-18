@@ -133,7 +133,7 @@ impl FrameCapture for libcamera_capture::LibcameraCapture {
     }
 }
 pub mod libcamera_capture {
-    use opencv::core::{AlgorithmHint, Mat, CV_8UC3};
+    use opencv::core::{AlgorithmHint, Mat, CV_8UC3, CV_8UC4};
     use opencv::imgproc;
     use opencv::prelude::MatTrait;
     use opencv::{Error, Result};
@@ -284,38 +284,63 @@ pub mod libcamera_capture {
                 return Ok(false);
             }
 
-            if self.bytes_per_pixel != 3 {
-                eprintln!(
-                    "[bsw][libcamera] unsupported pixel size {} (out_size={}, stride={})",
-                    self.bytes_per_pixel, out_size, self.stride
-                );
-                return Err(opencv_err(format!(
-                    "Unsupported pixel size from libcamera: {} bytes",
-                    self.bytes_per_pixel
-                )));
-            }
+            match self.bytes_per_pixel {
+                3 => {
+                    let mut rgb_mat = unsafe {
+                        Mat::new_rows_cols_with_data_unsafe(
+                            self.height as i32,
+                            self.width as i32,
+                            CV_8UC3,
+                            self.buffer.as_mut_ptr() as *mut c_void,
+                            self.stride,
+                        )?
+                    };
 
-            let mut rgb_mat = unsafe {
-                Mat::new_rows_cols_with_data_unsafe(
-                    self.height as i32,
-                    self.width as i32,
-                    CV_8UC3,
-                    self.buffer.as_mut_ptr() as *mut c_void,
-                    self.stride,
-                )?
-            };
+                    imgproc::cvt_color(
+                        &rgb_mat,
+                        frame,
+                        imgproc::COLOR_RGB2BGR,
+                        0,
+                        AlgorithmHint::ALGO_HINT_DEFAULT,
+                    )?;
 
-            imgproc::cvt_color(
-                &rgb_mat,
-                frame,
-                imgproc::COLOR_RGB2BGR,
-                0,
-                AlgorithmHint::ALGO_HINT_DEFAULT,
-            )?;
+                    unsafe {
+                        rgb_mat.release()?;
+                    }
+                }
+                4 => {
+                    let mut rgba_mat = unsafe {
+                        Mat::new_rows_cols_with_data_unsafe(
+                            self.height as i32,
+                            self.width as i32,
+                            CV_8UC4,
+                            self.buffer.as_mut_ptr() as *mut c_void,
+                            self.stride,
+                        )?
+                    };
 
-            // Ensure we release the reference before the next capture.
-            unsafe {
-                rgb_mat.release()?;
+                    imgproc::cvt_color(
+                        &rgba_mat,
+                        frame,
+                        imgproc::COLOR_RGBA2BGR,
+                        0,
+                        AlgorithmHint::ALGO_HINT_DEFAULT,
+                    )?;
+
+                    unsafe {
+                        rgba_mat.release()?;
+                    }
+                }
+                other => {
+                    eprintln!(
+                        "[bsw][libcamera] unsupported pixel size {} (out_size={}, stride={})",
+                        other, out_size, self.stride
+                    );
+                    return Err(opencv_err(format!(
+                        "Unsupported pixel size from libcamera: {} bytes",
+                        other
+                    )));
+                }
             }
 
             println!(

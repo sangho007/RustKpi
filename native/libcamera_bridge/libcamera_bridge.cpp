@@ -7,6 +7,7 @@
 #include <libcamera/stream.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <condition_variable>
 #include <cstring>
 #include <memory>
@@ -127,11 +128,18 @@ bool CameraBridge::init(uint32_t width,
     libcamera::StreamConfiguration &stream_config = config_->at(0);
     stream_config.size.width = width;
     stream_config.size.height = height;
-    stream_config.pixelFormat = libcamera::formats::RGB888;
+    stream_config.pixelFormat = libcamera::formats::XRGB8888;
     stream_config.bufferCount = std::max(stream_config.bufferCount, 4U);
-    (void)fps; // Frame rate control can be added via controls if necessary.
+    (void)fps;
 
     config_->validate();
+
+    {
+        std::string cfg_desc = stream_config.toString();
+        std::fprintf(stderr,
+                     "[libcamera_bridge] validated stream: %s\\n",
+                     cfg_desc.c_str());
+    }
 
     if (camera_->configure(config_.get())) {
         err = "Failed to configure camera";
