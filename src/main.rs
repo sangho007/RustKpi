@@ -30,14 +30,14 @@ async fn main() -> opencv::Result<()> {
 
 
     // ASW Task 생성
-    // tokio::spawn(asw::vs_lane::runnable_pre_processing(
-    //     "PreProcess",
-    //     camera_channels.clone(),
-    // ));
-    // tokio::spawn(asw::vs_lane::runnable_get_lane_angle(
-    //     "LaneAngle",
-    //     camera_channels.clone(),
-    // ));
+    tokio::spawn(asw::vs_lane::runnable_pre_processing(
+        "PreProcess",
+        camera_channels.clone(),
+    ));
+    tokio::spawn(asw::vs_lane::runnable_get_lane_angle(
+        "LaneAngle",
+        camera_channels.clone(),
+    ));
     // tokio::spawn(asw::forwardcollision_ultrasonic::runnable_obstacle_detection(
     //     "UssObstacle",
     //     ultrasonic_channels.clone(),
