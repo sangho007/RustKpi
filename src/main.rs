@@ -23,7 +23,7 @@ async fn main() -> opencv::Result<()> {
     tokio::spawn(bsw::ecu_abs_ultrasonic::ea_ultrasonic_provider(
         ultrasonic_channels.clone(),
     ));
-    tokio::spawn(bsw::ecu_abs_pca9685::ea_pca9685_actuator(
+    tokio::spawn(bsw::ecu_abs_pwm::ea_pca9685_actuator(
         "MotorControl",
         control_channels.clone(),
     ));
@@ -38,7 +38,7 @@ async fn main() -> opencv::Result<()> {
         "LaneAngle",
         camera_channels.clone(),
     ));
-    tokio::spawn(asw::uss_forwardcollision::runnable_obstacle_detection(
+    tokio::spawn(asw::forwardcollision_ultrasonic::runnable_obstacle_detection(
         "UssObstacle",
         ultrasonic_channels.clone(),
     ));

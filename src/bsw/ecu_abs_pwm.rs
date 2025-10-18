@@ -1,6 +1,6 @@
-// 파일명: ecu_abs_pca9685.rs
+// 파일명: ecu_abs_pwm
 
-use crate::bsw::lib::pca9685_lib::*;
+use crate::bsw::lib::pwm_lib::*;
 use crate::rte::rte_main::ControlChannels;
 use linux_embedded_hal::I2cdev;
 use std::time::{Duration, Instant};
