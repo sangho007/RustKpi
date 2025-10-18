@@ -54,7 +54,7 @@ async fn main() -> opencv::Result<()> {
 
     const DEBUG_ON:bool = true;
 
-    
+    let mut camraw_rx = camera_channels.raw_tx.subscribe();
     let mut processed_rx = camera_channels.processed_tx.subscribe();
     let mut birds_eye_rx = camera_channels.bird_eye_tx.subscribe();
     let mut lane_angle_rx = camera_channels.lane_angle_tx.subscribe();
@@ -64,12 +64,25 @@ async fn main() -> opencv::Result<()> {
     highgui::named_window("CAM View", highgui::WINDOW_AUTOSIZE)?;
 
     // 각 창에 표시할 최신 프레임을 저장할 변수 (루프 외부에 선언)
+    let mut latest_raw_frame: Option<Arc<DtoCamRaw>> = None;
     let mut latest_processed_frame: Option<Arc<DtoCamProcessed>> = None;
     let mut latest_birds_eye_frame: Option<Arc<DtoCamBirdEyeView>> = None;
 
     // Main 스레드에서 GUI 이벤트 루프 실행
     'main_loop: loop {
         select! {
+            result = camraw_rx.recv() => match result {
+                Ok(camraw) => {
+                    latest_raw_frame = Some(camraw);
+                }
+                Err(RecvError::Lagged(n)) => {
+                    eprintln!("[MAIN] raw frame lagged by {}", n);
+                }
+                Err(RecvError::Closed) => {
+                    eprintln!("[MAIN] raw frame channel closed.");
+                    break 'main_loop;
+                }
+            },
             result = processed_rx.recv() => match result {
                 Ok(cam_processed) => {
                     latest_processed_frame = Some(cam_processed);
@@ -123,12 +136,15 @@ async fn main() -> opencv::Result<()> {
         if DEBUG_ON {
             // 2) 블로킹 렌더링을 block_in_place로 감쌈
             let should_quit = task::block_in_place(|| -> opencv::Result<bool> {
-                if let Some(frame) = &latest_processed_frame {
-                    highgui::imshow("CAM View", &*frame.img)?;
+                if let Some(frame) = &latest_raw_frame {
+                    highgui::imshow("Raw View", &*frame.img)?;
                 }
-                if let Some(frame) = &latest_birds_eye_frame {
-                    highgui::imshow("Bird's Eye View", &*frame.img)?;
-                }
+                // if let Some(frame) = &latest_processed_frame {
+                //     highgui::imshow("CAM View", &*frame.img)?;
+                // }
+                // if let Some(frame) = &latest_birds_eye_frame {
+                //     highgui::imshow("Bird's Eye View", &*frame.img)?;
+                // }
                 let key = highgui::wait_key(1)?;
                 Ok(key == 113) // 'q'
             })?;
