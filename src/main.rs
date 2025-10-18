@@ -6,7 +6,9 @@ mod asw;
 
 use crate::rte::rte_dto::*;
 use crate::rte::rte_main::RteSystem;
+use opencv::core::{AlgorithmHint, Mat};
 use opencv::highgui;
+use opencv::imgproc;
 use tokio::task;
 use tokio::{select, sync::broadcast::error::RecvError};
 use std::sync::Arc;
@@ -137,7 +139,33 @@ async fn main() -> opencv::Result<()> {
             // 2) 블로킹 렌더링을 block_in_place로 감쌈
             let should_quit = task::block_in_place(|| -> opencv::Result<bool> {
                 if let Some(frame) = &latest_raw_frame {
-                    highgui::imshow("Raw View", &*frame.img)?;
+                    match frame.color_format {
+                        ColorFormat::Bgr | ColorFormat::Gray => {
+                            highgui::imshow("Raw View", &*frame.img)?;
+                        }
+                        ColorFormat::Rgb => {
+                            let mut converted = Mat::default();
+                            imgproc::cvt_color(
+                                &*frame.img,
+                                &mut converted,
+                                imgproc::COLOR_RGB2BGR,
+                                0,
+                                AlgorithmHint::ALGO_HINT_DEFAULT,
+                            )?;
+                            highgui::imshow("Raw View", &converted)?;
+                        }
+                        ColorFormat::Rgba => {
+                            let mut converted = Mat::default();
+                            imgproc::cvt_color(
+                                &*frame.img,
+                                &mut converted,
+                                imgproc::COLOR_RGBA2BGR,
+                                0,
+                                AlgorithmHint::ALGO_HINT_DEFAULT,
+                            )?;
+                            highgui::imshow("Raw View", &converted)?;
+                        }
+                    }
                 }
                 // if let Some(frame) = &latest_processed_frame {
                 //     highgui::imshow("CAM View", &*frame.img)?;

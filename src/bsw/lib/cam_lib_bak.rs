@@ -7,6 +7,7 @@ pub mod picamera_capture {
     use pyo3::exceptions::PyRuntimeError;
     use std::ffi::c_void;
     use crate::bsw::lib::cam_lib;
+    use crate::rte::rte_dto::ColorFormat;
 
     pub const CAM_MODE: i32 = 1;
 
@@ -98,12 +99,17 @@ use opencv::{prelude::*,videoio,Result};
 /// 프레임을 읽어오는 동작을 추상화하는 Trait
 pub trait FrameCapture: Send {
     fn read_frame(&mut self, frame: &mut Mat) -> Result<bool>;
+    fn color_format(&self) -> ColorFormat;
 }
 
 // 기존 `videoio::VideoCapture`에 대해 Trait 구현
 impl FrameCapture for videoio::VideoCapture {
     fn read_frame(&mut self, frame: &mut Mat) -> Result<bool> {
         videoio::VideoCapture::read(self, frame)
+    }
+
+    fn color_format(&self) -> ColorFormat {
+        ColorFormat::Bgr
     }
 }
 
@@ -128,5 +134,9 @@ impl FrameCapture for picamera_capture::PiCamera2 {
                 ))
             }
         }
+    }
+
+    fn color_format(&self) -> ColorFormat {
+        ColorFormat::Bgr
     }
 }

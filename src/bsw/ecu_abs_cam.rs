@@ -1,12 +1,10 @@
 use crate::bsw::lib::cam_lib;
-use crate::rte::rte_dto::DtoCamRaw;
+use crate::rte::rte_dto::{ColorFormat, DtoCamRaw};
 use crate::rte::rte_main::CameraChannels;
 use opencv::core::Mat;
 use opencv::prelude::{MatTraitConst, VideoCaptureTraitConst};
 use opencv::{videoio, Result};
 use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
 
 pub async fn ea_cam_provider(camera: CameraChannels) -> Result<()> {
     tokio::task::spawn_blocking(move || -> Result<()> {
@@ -32,10 +30,9 @@ pub async fn ea_cam_provider(camera: CameraChannels) -> Result<()> {
             let height = if height == 0 { 720 } else { height };
             (Box::new(file_cap), width, height)
         };
-        let frame_interval = Duration::from_millis(33);
+        let color_format = cap.color_format();
 
         loop {
-            let loop_start = Instant::now();
             let mut frame = Mat::default();
 
             match cap.read_frame(&mut frame) {
@@ -52,17 +49,18 @@ pub async fn ea_cam_provider(camera: CameraChannels) -> Result<()> {
                 }
             }
 
-            let cam_raw = Arc::new(DtoCamRaw::new(Arc::new(frame), frame_width, frame_height, alive_cnt));
+            let cam_raw = Arc::new(DtoCamRaw::new(
+                Arc::new(frame),
+                frame_width,
+                frame_height,
+                alive_cnt,
+                color_format,
+            ));
 
             // 새로 만든 구조체의 소유권을 Arc로 넘깁니다.
             let _ = raw_tx.send(cam_raw.clone());
 
             alive_cnt += 1;
-
-            let elapsed = loop_start.elapsed();
-            if elapsed < frame_interval {
-                thread::sleep(frame_interval - elapsed);
-            }
         }
 
         Ok(())

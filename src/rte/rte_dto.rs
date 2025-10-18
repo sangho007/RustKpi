@@ -2,6 +2,14 @@ use crate::asw::lib::vs_trafficlight_lib::TrafficLightColor;
 use opencv::core::Mat;
 use std::sync::Arc;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorFormat {
+    Bgr,
+    Rgb,
+    Rgba,
+    Gray,
+}
+
 #[derive(Debug, Clone)]
 pub enum VfbEvent {
     // Cam
@@ -25,11 +33,24 @@ pub struct DtoCamRaw {
     pub width: u32,
     pub height: u32,
     pub alive_cnt: u32,
+    pub color_format: ColorFormat,
 }
 
 impl DtoCamRaw {
-    pub fn new(img: Arc<Mat>, width: u32, height: u32, alive_cnt: u32) -> Self {
-        Self { img, width, height, alive_cnt }
+    pub fn new(
+        img: Arc<Mat>,
+        width: u32,
+        height: u32,
+        alive_cnt: u32,
+        color_format: ColorFormat,
+    ) -> Self {
+        Self {
+            img,
+            width,
+            height,
+            alive_cnt,
+            color_format,
+        }
     }
 }
 
@@ -136,7 +157,6 @@ impl DtoTrafficLight {
         Self { traffic_light_color, alive_cnt }
     }
 }
-
 
 
 

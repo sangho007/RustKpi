@@ -87,6 +87,7 @@ pub mod picamera_capture {
         }
     }
 }
+use crate::rte::rte_dto::ColorFormat;
 use opencv::core::Mat;
 use opencv::prelude::{MatTraitConst, VideoCaptureTrait, VideoCaptureTraitConst};
 use opencv::{videoio, Result};
@@ -94,12 +95,17 @@ use opencv::{videoio, Result};
 /// 프레임을 읽어오는 동작을 추상화하는 Trait
 pub trait FrameCapture: Send {
     fn read_frame(&mut self, frame: &mut Mat) -> Result<bool>;
+    fn color_format(&self) -> ColorFormat;
 }
 
 // 기존 `videoio::VideoCapture`에 대해 Trait 구현
 impl FrameCapture for videoio::VideoCapture {
     fn read_frame(&mut self, frame: &mut Mat) -> Result<bool> {
         VideoCaptureTrait::read(self, frame)
+    }
+
+    fn color_format(&self) -> ColorFormat {
+        ColorFormat::Bgr
     }
 }
 
@@ -125,17 +131,25 @@ impl FrameCapture for picamera_capture::PiCamera2 {
             }
         }
     }
+
+    fn color_format(&self) -> ColorFormat {
+        ColorFormat::Bgr
+    }
 }
 
 impl FrameCapture for libcamera_capture::LibcameraCapture {
     fn read_frame(&mut self, frame: &mut Mat) -> Result<bool> {
         self.capture_into(frame)
     }
+
+    fn color_format(&self) -> ColorFormat {
+        self.color_format()
+    }
 }
 pub mod libcamera_capture {
-    use opencv::core::{AlgorithmHint, Mat, CV_8UC3, CV_8UC4};
-    use opencv::imgproc;
-    use opencv::prelude::MatTrait;
+    use crate::rte::rte_dto::ColorFormat;
+    use opencv::core::{Mat, CV_8UC3, CV_8UC4};
+    use opencv::prelude::{MatTrait, MatTraitConst};
     use opencv::{Error, Result};
     use std::cmp;
     use std::ffi::{c_char, c_void, CStr};
@@ -183,9 +197,13 @@ pub mod libcamera_capture {
         stride: usize,
         bytes_per_pixel: usize,
         buffer: Vec<u8>,
+        color_format: ColorFormat,
+        frame_counter: u64,
     }
 
     impl LibcameraCapture {
+        const LOG_INTERVAL: u64 = 120;
+
         pub fn new(width: u32, height: u32, fps: u32) -> Result<Self> {
             println!(
                 "[bsw][libcamera] new() requested width={} height={} fps={}",
@@ -230,6 +248,16 @@ pub mod libcamera_capture {
                 .checked_mul(height as usize)
                 .ok_or_else(|| opencv_err("libcamera buffer size overflow"))?;
             let buffer = vec![0u8; buffer_len];
+            let color_format = match bytes_per_pixel {
+                3 => ColorFormat::Rgb,
+                4 => ColorFormat::Rgba,
+                other => {
+                    return Err(opencv_err(format!(
+                        "Unsupported pixel size during init: {} bytes",
+                        other
+                    )))
+                }
+            };
 
             println!(
                 "[bsw][libcamera] init stride={} bytes_per_pixel={} dims={}x{} buffer_len={}",
@@ -243,6 +271,8 @@ pub mod libcamera_capture {
                 stride: stride_usize,
                 bytes_per_pixel,
                 buffer,
+                color_format,
+                frame_counter: 0,
             })
         }
 
@@ -284,53 +314,9 @@ pub mod libcamera_capture {
                 return Ok(false);
             }
 
-            match self.bytes_per_pixel {
-                3 => {
-                    let mut rgb_mat = unsafe {
-                        Mat::new_rows_cols_with_data_unsafe(
-                            self.height as i32,
-                            self.width as i32,
-                            CV_8UC3,
-                            self.buffer.as_mut_ptr() as *mut c_void,
-                            self.stride,
-                        )?
-                    };
-
-                    imgproc::cvt_color(
-                        &rgb_mat,
-                        frame,
-                        imgproc::COLOR_RGB2BGR,
-                        0,
-                        AlgorithmHint::ALGO_HINT_DEFAULT,
-                    )?;
-
-                    unsafe {
-                        rgb_mat.release()?;
-                    }
-                }
-                4 => {
-                    let mut rgba_mat = unsafe {
-                        Mat::new_rows_cols_with_data_unsafe(
-                            self.height as i32,
-                            self.width as i32,
-                            CV_8UC4,
-                            self.buffer.as_mut_ptr() as *mut c_void,
-                            self.stride,
-                        )?
-                    };
-
-                    imgproc::cvt_color(
-                        &rgba_mat,
-                        frame,
-                        imgproc::COLOR_RGBA2BGR,
-                        0,
-                        AlgorithmHint::ALGO_HINT_DEFAULT,
-                    )?;
-
-                    unsafe {
-                        rgba_mat.release()?;
-                    }
-                }
+            let mat_type = match self.bytes_per_pixel {
+                3 => CV_8UC3,
+                4 => CV_8UC4,
                 other => {
                     eprintln!(
                         "[bsw][libcamera] unsupported pixel size {} (out_size={}, stride={})",
@@ -341,18 +327,41 @@ pub mod libcamera_capture {
                         other
                     )));
                 }
+            };
+
+            let mut raw_view = unsafe {
+                Mat::new_rows_cols_with_data_unsafe(
+                    self.height as i32,
+                    self.width as i32,
+                    mat_type,
+                    self.buffer.as_mut_ptr() as *mut c_void,
+                    self.stride,
+                )?
+            };
+
+            *frame = raw_view.try_clone()?;
+
+            unsafe {
+                raw_view.release()?;
             }
 
-            println!(
-                "[bsw][libcamera] captured frame {}x{} bytes={} ts_ns={}",
-                self.width, self.height, out_size, timestamp_ns
-            );
+            self.frame_counter = self.frame_counter.wrapping_add(1);
+            if self.frame_counter % Self::LOG_INTERVAL == 0 {
+                println!(
+                    "[bsw][libcamera] captured frame {}x{} bytes={} ts_ns={}",
+                    self.width, self.height, out_size, timestamp_ns
+                );
+            }
 
             Ok(true)
         }
 
         pub fn dimensions(&self) -> (u32, u32) {
             (self.width, self.height)
+        }
+
+        pub fn color_format(&self) -> ColorFormat {
+            self.color_format
         }
     }
 
