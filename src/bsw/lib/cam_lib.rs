@@ -222,6 +222,11 @@ pub mod libcamera_capture {
                 .ok_or_else(|| opencv_err("libcamera buffer size overflow"))?;
             let buffer = vec![0u8; buffer_len];
 
+            println!(
+                "[bsw][libcamera] init stride={} bytes_per_pixel={} dims={}x{} buffer_len={}",
+                stride_usize, bytes_per_pixel, width, height, buffer_len
+            );
+
             Ok(Self {
                 handle: unsafe { NonNull::new_unchecked(handle) },
                 width,
@@ -258,14 +263,23 @@ pub mod libcamera_capture {
                 } else {
                     msg
                 };
+                eprintln!(
+                    "[bsw][libcamera] capture error rc={} out_size={} stride={} bpp={}",
+                    rc, out_size, self.stride, self.bytes_per_pixel
+                );
                 return Err(opencv_err(msg));
             }
 
             if out_size == 0 {
+                println!("[bsw][libcamera] capture returned empty frame");
                 return Ok(false);
             }
 
             if self.bytes_per_pixel != 3 {
+                eprintln!(
+                    "[bsw][libcamera] unsupported pixel size {} (out_size={}, stride={})",
+                    self.bytes_per_pixel, out_size, self.stride
+                );
                 return Err(opencv_err(format!(
                     "Unsupported pixel size from libcamera: {} bytes",
                     self.bytes_per_pixel
@@ -294,6 +308,11 @@ pub mod libcamera_capture {
             unsafe {
                 rgb_mat.release()?;
             }
+
+            println!(
+                "[bsw][libcamera] captured frame {}x{} bytes={} ts_ns={}",
+                self.width, self.height, out_size, timestamp_ns
+            );
 
             Ok(true)
         }
