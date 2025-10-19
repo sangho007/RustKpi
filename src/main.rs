@@ -102,6 +102,9 @@ async fn main() -> opencv::Result<()> {
     let mut lane_angle_rx = camera_channels.lane_angle_tx.subscribe();
     let mut distance_rx = ultrasonic_channels.raw_tx.subscribe();
 
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+
     'main_loop: loop {
         select! {
             biased;
@@ -219,7 +222,15 @@ async fn main() -> opencv::Result<()> {
                     eprintln!("[MAIN] Uss angle channel closed.");
                     break 'main_loop;
                 }
-            }
+            },
+            result = &mut ctrl_c => {
+                if let Err(err) = result {
+                    eprintln!("[MAIN] Failed to receive Ctrl-C signal: {}", err);
+                } else {
+                    println!("[MAIN] Ctrl-C received, shutting down...");
+                }
+                break 'main_loop;
+            },
         }
 
         if let Some(event_rx) = preview_event_rx.as_mut() {
