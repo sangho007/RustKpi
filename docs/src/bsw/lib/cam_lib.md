@@ -1,21 +1,25 @@
-# cam_lib.rs — 카메라 캡처 추상화
+# cam_lib.rs - 카메라 캡처 추상화
 
 - 경로: `src/bsw/lib/cam_lib.rs`
 - 계층: BSW / 라이브러리
 
-## 목적
-카메라 소스별 차이를 추상화하여 동일한 인터페이스로 프레임을 획득할 수 있게 합니다. 현재는 OpenCV `VideoCapture`와 libcamera 브리지 기반 캡처를 지원합니다.
-
-## 공용 인터페이스
-- `trait FrameCapture { fn read_frame(&mut self) -> Result<Option<CapturedFrame>>; }`
-  - 성공 시 `Some(CapturedFrame)` 반환, EOF/빈 프레임이면 `None`.
+## 핵심 개념
+- `CapturedFrame`: `CameraBuffer`(픽셀 데이터), 해상도, stride, bytes_per_pixel, `ColorFormat` 메타데이터를 포함한 구조체. `Arc`로 공유해 다운스트림 복사를 피합니다.
+- `CameraBuffer`: 선택적으로 `BufferRecycler`를 붙여 libcamera 풀 메모리를 재활용할 수 있는 버퍼 래퍼.
+- `FrameCapture` 트레이트: `read_frame(&mut self) -> Result<Option<CapturedFrame>>` 인터페이스로 다양한 캡처 백엔드를 통일합니다.
 
 ## 구현체
-- `opencv::videoio::VideoCapture`: OpenCV 표준 API를 그대로 위임.
+- `videoio::VideoCapture`:
+  - OpenCV 캡처에서 프레임을 읽어 `fit_frame_to_target`으로 캘리브레이션된 해상도에 맞춥니다.
+  - stride/bytes_per_pixel을 계산해 `CameraBuffer::from_vec`에 저장합니다.
 - `libcamera_capture::LibcameraCapture`:
-  - C++ FFI 브리지를 통해 libcamera 파이프라인에서 BGR/GRAY/RGBA 버퍼를 받음.
-  - 내부 풀을 사용해 버퍼 재활용 및 `BufferRecycler` 인터페이스 구현.
+  - C++ 브리지(`libcamera_bridge.cpp`)를 통해 큐잉된 버퍼를 받아오고, 재활용 풀(`BufferPool`)로 메모리를 재사용합니다.
+  - `CapturedFrame::new`에 stride, bytes_per_pixel, `ColorFormat`을 함께 전달합니다.
 
-## 주의/성능
-- `CapturedFrame`은 `CameraBuffer`를 `Arc`로 포장해 상위 계층과 버퍼를 공유.
-- libcamera 브리지는 stride/bytes-per-pixel을 런타임에 보고하므로 다운스트림에서 해당 값을 신뢰해야 함.
+## 보조 함수
+- `fit_frame_to_target(frame: &Mat) -> Result<Mat>`: 입력 영상 비율에 따라 크롭 또는 레터박스로 조정 후 `CameraCalibration::default()`가 정의한 폭/높이로 리사이즈합니다.
+- `mat_from_buffer` / `ensure_bgr`: RTE DTO에서 `CameraBuffer`를 OpenCV `Mat`으로 바라보거나 BGR 색 공간으로 변환할 때 사용합니다.
+
+## 활용
+- `bsw::ecu_abs_cam::ea_cam_provider`는 백엔드(libcamera/비디오 파일)를 추상화하기 위해 `FrameCapture` 트레이트와 `CapturedFrame` 메타데이터를 사용합니다.
+- ASW 단계는 `DtoCamRaw`에서 stride와 색 포맷 정보를 참조해 안전하게 `Mat` 뷰를 생성합니다.

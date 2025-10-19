@@ -1,10 +1,6 @@
-# uss_lib.rs — 초음파 임계값 설정
+# forwardcollision_ultrasonic_lib.rs - 장애물 임계값 캘리브레이션
 
-- 경로: `src/asw/lib/lib_ultrasonic.rs`
+- 경로: `src/asw/lib/forwardcollision_ultrasonic_lib.rs`
 - 계층: ASW / 라이브러리
 
-## 상수
-- `THRESHOLD_DISTANCE: f32 = 30.0` (cm)
-
-장애물 감지 태스크(`uss_forwardcollision`)에서 거리 판정 임계값으로 사용됩니다.
-
+`forward_collision_calibration()` 함수가 `ForwardCollisionCalibration::default()`를 반환합니다. 현재 설정은 `threshold_distance = 30.0f32`로, `asw::forwardcollision_ultrasonic` 태스크에서 장애물 판정 기준으로 사용됩니다. 거리 임계값을 조정할 때는 캘리브레이션만 수정하면 나머지 로직은 변경할 필요가 없습니다.

@@ -13,12 +13,16 @@ use tokio::{select, sync::broadcast::error::RecvError};
 
 const DEBUG_ON: bool = true;
 
+/// RTE 채널을 사용하며 프리뷰 GUI와 데이터 스트림을 조율하는 메인 런타임 루프를 수행한다.
 pub async fn run(channels: RteChannels) -> opencv::Result<()> {
+    // 카메라·초음파 채널을 복제해 비동기 작업에서 공유한다.
     let camera_channels = channels.camera.clone();
     let ultrasonic_channels = channels.ultrasonic.clone();
 
+    // 사용자에게 실행 상태를 안내한다.
     println!("== 시스템 실행 중... (GUI 창에서 'q'를 누르면 종료) ==");
 
+    // 디버그 모드에서는 프리뷰 스레드를 띄워 GUI를 활성화한다.
     let (mut preview_tx, mut preview_event_rx, preview_handle) = if DEBUG_ON {
         let runtime = preview_runtime::spawn_preview_thread()?;
         (Some(runtime.tx), Some(runtime.event_rx), Some(runtime.handle))
@@ -26,24 +30,30 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
         (None, None, None)
     };
 
+    // 각 데이터 스트림을 구독한다.
     let mut camraw_rx = camera_channels.raw_tx.subscribe();
     let mut processed_rx = camera_channels.processed_tx.subscribe();
     let mut birds_eye_rx = camera_channels.bird_eye_tx.subscribe();
     let mut lane_angle_rx = camera_channels.lane_angle_tx.subscribe();
     let mut distance_rx = ultrasonic_channels.raw_tx.subscribe();
 
+    // Ctrl-C 입력을 감시해 사용자의 종료 요청을 처리한다.
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
 
+    // GUI와 ASW 데이터를 중계하는 메인 이벤트 루프다.
     'main_loop: loop {
         select! {
             biased;
+
+            // 최신 원시 카메라 프레임을 프리뷰로 전달한다.
             result = camraw_rx.recv() => match result {
                 Ok(camraw) => {
                     let mut newest = camraw;
                     while let Ok(newer) = camraw_rx.try_recv() {
                         newest = newer;
                     }
+
                     if let Some(tx) = preview_tx.as_ref() {
                         let payload = FramePacket {
                             width: newest.width,
@@ -63,12 +73,15 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                     break 'main_loop;
                 }
             },
+
+            // 전처리된 프레임을 프리뷰에 갱신한다.
             result = processed_rx.recv() => match result {
                 Ok(cam_processed) => {
                     let mut newest = cam_processed;
                     while let Ok(newer) = processed_rx.try_recv() {
                         newest = newer;
                     }
+
                     if let Some(tx) = preview_tx.as_ref() {
                         let mat = newest.img.clone();
                         match mat.as_ref().step1(0) {
@@ -83,7 +96,9 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                                 };
                                 let _ = tx.send(PreviewMessage::Processed(payload));
                             }
-                            Err(err) => eprintln!("[GUI] Failed to read processed stride: {}", err),
+                            Err(err) => {
+                                eprintln!("[GUI] Failed to read processed stride: {}", err);
+                            }
                         }
                     }
                 }
@@ -95,12 +110,15 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                     break 'main_loop;
                 }
             },
+
+            // 버드아이 뷰 프레임을 갱신한다.
             result = birds_eye_rx.recv() => match result {
                 Ok(birds_eye) => {
                     let mut newest = birds_eye;
                     while let Ok(newer) = birds_eye_rx.try_recv() {
                         newest = newer;
                     }
+
                     if let Some(tx) = preview_tx.as_ref() {
                         let mat = newest.img.clone();
                         match mat.as_ref().step1(0) {
@@ -115,7 +133,9 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                                 };
                                 let _ = tx.send(PreviewMessage::Bird(payload));
                             }
-                            Err(err) => eprintln!("[GUI] Failed to read bird-eye stride: {}", err),
+                            Err(err) => {
+                                eprintln!("[GUI] Failed to read bird-eye stride: {}", err);
+                            }
                         }
                     }
                 }
@@ -127,6 +147,8 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                     break 'main_loop;
                 }
             },
+
+            // 차선 각도 결과를 로그로 출력한다.
             result = lane_angle_rx.recv() => match result {
                 Ok(lane_angle) => {
                     println!("Angle: {}, alive_cnt: {}", lane_angle.angle, lane_angle.alive_cnt);
@@ -139,6 +161,8 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                     break 'main_loop;
                 }
             },
+
+            // 초음파 거리 정보를 출력한다.
             result = distance_rx.recv() => match result {
                 Ok(distance) => {
                     println!("distance: {}, alive_cnt: {}", distance.distance, distance.alive_cnt);
@@ -151,6 +175,8 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                     break 'main_loop;
                 }
             },
+
+            // 사용자 Ctrl-C 입력을 감지한다.
             result = &mut ctrl_c => {
                 if let Err(err) = result {
                     eprintln!("[MAIN] Failed to receive Ctrl-C signal: {}", err);
@@ -161,6 +187,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
             },
         }
 
+        // GUI에서 종료 이벤트를 요청하면 즉시 빠져나간다.
         if let Some(event_rx) = preview_event_rx.as_mut() {
             if let Ok(PreviewEvent::Quit) = event_rx.try_recv() {
                 println!("[MAIN] Preview requested quit, shutting down...");
@@ -169,9 +196,12 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
         }
     }
 
+    // 프리뷰 송신자를 정리한다.
     if let Some(tx) = preview_tx.take() {
         drop(tx);
     }
+
+    // 프리뷰 스레드를 종료까지 대기한다.
     if let Some(handle) = preview_handle {
         if let Err(err) = handle.join() {
             eprintln!("[MAIN] Failed to join preview thread: {:?}", err);
@@ -182,12 +212,14 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
     Ok(())
 }
 
+/// OpenCV Mat의 채널 수를 기준으로 프리뷰에 사용할 색상 포맷을 결정한다.
 fn mat_color_format(mat: &Mat) -> ColorFormat {
     match mat.channels() {
         1 => ColorFormat::Gray,
         3 => ColorFormat::Bgr,
         4 => ColorFormat::Rgba,
         ch => {
+            // 지원하지 않는 채널 수는 경고를 남기고 BGR로 폴백한다.
             eprintln!("[GUI] Unsupported channel count for preview: {}", ch);
             ColorFormat::Bgr
         }
