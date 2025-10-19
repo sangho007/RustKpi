@@ -1,9 +1,18 @@
+//! Camera capture abstraction used by the BSW camera ECU.
+//!
+//! Provides a lightweight trait (`FrameCapture`) with implementations for
+//! OpenCV's `VideoCapture` and the libcamera bridge so upper layers can treat
+//! every source uniformly.
+
 use crate::rte::rte_dto::{CameraBuffer, ColorFormat};
 use opencv::core::Mat;
 use opencv::prelude::{MatTraitConst, MatTraitConstManual, VideoCaptureTrait};
 use opencv::{Result, videoio};
 use std::sync::Arc;
 
+/// Immutable metadata plus the pixel buffer for a captured frame.
+/// Buffer ownership is shared through `Arc` so downstream tasks may hold
+/// onto the image while the capture thread continues acquiring new frames.
 pub struct CapturedFrame {
     pub buffer: Arc<CameraBuffer>,
     pub width: u32,
@@ -33,13 +42,18 @@ impl CapturedFrame {
     }
 }
 
-/// 프레임을 읽어오는 동작을 추상화하는 Trait
+/// 프레임을 읽어오는 동작을 추상화하는 Trait.
+///
+/// - `Ok(Some(frame))` : 새 픽셀 데이터가 준비됨
+/// - `Ok(None)`        : EOF 또는 일시적 빈 프레임
+/// - `Err(err)`        : 하드웨어/디코딩 오류 발생
 pub trait FrameCapture: Send {
     fn read_frame(&mut self) -> Result<Option<CapturedFrame>>;
 }
 
 // 기존 `videoio::VideoCapture`에 대해 Trait 구현
 impl FrameCapture for videoio::VideoCapture {
+    /// OpenCV `Mat`을 읽어 `CameraBuffer`로 복사한다.
     fn read_frame(&mut self) -> Result<Option<CapturedFrame>> {
         let mut frame = Mat::default();
         if !VideoCaptureTrait::read(self, &mut frame)? || frame.empty() {
@@ -70,6 +84,8 @@ impl FrameCapture for libcamera_capture::LibcameraCapture {
     }
 }
 pub mod libcamera_capture {
+    //! Thin wrapper around the C++ libcamera bridge (see `native/libcamera_bridge`).
+    //! Converts raw buffers into `CapturedFrame` and recycles memory via a pool.
     use super::CapturedFrame;
     use crate::rte::rte_dto::{BufferRecycler, CameraBuffer, ColorFormat};
     use opencv::{Error, Result};
@@ -113,6 +129,7 @@ pub mod libcamera_capture {
         Error::new(opencv::core::StsError, msg.into())
     }
 
+    /// Simple reusable buffer pool shared across libcamera callbacks.
     struct BufferPool {
         buffer_len: usize,
         buffers: Mutex<Vec<Vec<u8>>>,
@@ -149,6 +166,7 @@ pub mod libcamera_capture {
 
     impl BufferRecycler for BufferPool {
         fn recycle(&self, mut buffer: Vec<u8>) {
+            // libcamera는 고정 길이 버퍼를 재사용하므로 길이를 맞춘 뒤 풀로 돌려보낸다.
             if buffer.len() != self.buffer_len {
                 buffer.resize(self.buffer_len, 0);
             }
@@ -157,6 +175,7 @@ pub mod libcamera_capture {
         }
     }
 
+    /// Wraps the native libcamera bridge handle and exposes it as `FrameCapture`.
     pub struct LibcameraCapture {
         handle: NonNull<LibcameraBridgeOpaque>,
         width: u32,
@@ -171,6 +190,7 @@ pub mod libcamera_capture {
     impl LibcameraCapture {
         const LOG_INTERVAL: u64 = 120;
 
+        /// Initialise the bridge, discover stride/BPP and prime the buffer pool.
         pub fn new(width: u32, height: u32, fps: u32) -> Result<Self> {
             println!(
                 "[bsw][libcamera] new() requested width={} height={} fps={}",
@@ -244,6 +264,8 @@ pub mod libcamera_capture {
             })
         }
 
+        /// Grab a frame from the bridge and wrap it in `CameraBuffer`, returning
+        /// `None` if libcamera reported an empty frame.
         pub fn capture_frame(&mut self) -> Result<Option<CapturedFrame>> {
             let mut out_size = 0usize;
             let mut timestamp_ns = 0u64;

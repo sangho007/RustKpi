@@ -1,3 +1,5 @@
+//! BSW ECU in charge of acquiring camera frames and pushing them onto the RTE.
+
 use crate::bsw::lib::cam_lib;
 use crate::rte::rte_dto::DtoCamRaw;
 use crate::rte::rte_main::CameraChannels;
@@ -13,6 +15,7 @@ const CAPTURE_QUEUE_DEPTH: usize = 3;
 const LIBCAM_WIDTH: u32 = 1280;
 const LIBCAM_HEIGHT: u32 = 720;
 
+/// Spawn the camera provider tasks and shuttle frames into the raw RTE channel.
 pub async fn ea_cam_provider(camera: CameraChannels) -> Result<()> {
     let CameraChannels { raw_tx, .. } = camera;
     let (frame_tx, mut frame_rx) = mpsc::channel::<cam_lib::CapturedFrame>(CAPTURE_QUEUE_DEPTH);
@@ -30,6 +33,7 @@ pub async fn ea_cam_provider(camera: CameraChannels) -> Result<()> {
     let mut alive_cnt = 0u32;
 
     while let Some(captured) = frame_rx.recv().await {
+        // DTO로 다시 패키징하여 RTE 카메라 RAW 채널로 전달한다.
         let cam_raw = Arc::new(DtoCamRaw::new(
             captured.buffer,
             captured.width,
@@ -63,7 +67,11 @@ pub async fn ea_cam_provider(camera: CameraChannels) -> Result<()> {
     }
 }
 
+/// Blocking capture loop executed on a dedicated thread. It keeps trying to
+/// initialise the selected capture backend and pushes frames onto the channel
+/// until the receiver goes away.
 fn camera_capture_loop(frame_tx: mpsc::Sender<cam_lib::CapturedFrame>) -> Result<()> {
+    // 계속해서 캡처 백엔드를 재초기화해 스트림 끊김에 대응한다.
     loop {
         let mut cap = match init_capture() {
             Ok(cap) => cap,
@@ -103,6 +111,8 @@ fn camera_capture_loop(frame_tx: mpsc::Sender<cam_lib::CapturedFrame>) -> Result
     }
 }
 
+/// Select the active capture backend. When `cammode` is true we use the
+/// libcamera bridge; otherwise we fall back to the sample video file.
 fn init_capture() -> Result<Box<dyn cam_lib::FrameCapture>> {
     let cammode = false;
     if cammode {

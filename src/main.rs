@@ -11,11 +11,24 @@ use crate::rte::rte_main::RteSystem;
 use gui::sdl_env::SdlEnv;
 use gui::sdl_preview::SdlPreview;
 use opencv::core;
+use opencv::core::Mat;
 use opencv::prelude::{MatTraitConst, MatTraitConstManual};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use std::sync::Arc;
 use tokio::{select, sync::broadcast::error::RecvError};
+
+fn mat_color_format(mat: &Mat) -> ColorFormat {
+    match mat.channels() {
+        1 => ColorFormat::Gray,
+        3 => ColorFormat::Bgr,
+        4 => ColorFormat::Rgba,
+        ch => {
+            eprintln!("[GUI] Unsupported channel count for preview: {}", ch);
+            ColorFormat::Bgr
+        }
+    }
+}
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> opencv::Result<()> {
@@ -198,6 +211,7 @@ async fn main() -> opencv::Result<()> {
                 let mat = processed.img.as_ref();
                 let data = mat.data_bytes()?;
                 let stride = mat.step1(0)? as usize;
+                let format = mat_color_format(mat);
 
                 if processed_preview.is_none() {
                     processed_preview = Some(SdlPreview::new(
@@ -205,18 +219,12 @@ async fn main() -> opencv::Result<()> {
                         "Processed View",
                         processed.width,
                         processed.height,
-                        ColorFormat::Bgr,
+                        format,
                     )?);
                 }
 
                 if let Some(preview) = processed_preview.as_mut() {
-                    preview.present(
-                        processed.width,
-                        processed.height,
-                        ColorFormat::Bgr,
-                        data,
-                        stride,
-                    )?;
+                    preview.present(processed.width, processed.height, format, data, stride)?;
                 }
             }
 
@@ -226,6 +234,7 @@ async fn main() -> opencv::Result<()> {
                 let mat = birds_eye.img.as_ref();
                 let data = mat.data_bytes()?;
                 let stride = mat.step1(0)? as usize;
+                let format = mat_color_format(mat);
 
                 if birds_eye_preview.is_none() {
                     birds_eye_preview = Some(SdlPreview::new(
@@ -233,18 +242,12 @@ async fn main() -> opencv::Result<()> {
                         "Bird's Eye View",
                         birds_eye.width,
                         birds_eye.height,
-                        ColorFormat::Bgr,
+                        format,
                     )?);
                 }
 
                 if let Some(preview) = birds_eye_preview.as_mut() {
-                    preview.present(
-                        birds_eye.width,
-                        birds_eye.height,
-                        ColorFormat::Bgr,
-                        data,
-                        stride,
-                    )?;
+                    preview.present(birds_eye.width, birds_eye.height, format, data, stride)?;
                 }
             }
 

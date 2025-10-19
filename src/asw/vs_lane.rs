@@ -1,3 +1,7 @@
+//! Lane processing tasks: pre-processing raw frames and estimating the lane angle.
+//! The heavy lifting lives in `asw::lib::vs_lane_lib::Pipeline`; this module
+//! wires it up to the RTE channels and applies the configurable calibration set.
+
 // asw/vision
 
 use crate::asw::lib::vs_lane_lib::*;
@@ -11,6 +15,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast::error::RecvError, oneshot};
 
+/// Consume raw camera frames, apply the image pre-processing pipeline and
+/// publish the processed grayscale output for downstream stages.
 pub async fn runnable_pre_processing(
     id: &'static str,
     camera: CameraChannels,
@@ -54,6 +60,7 @@ pub async fn runnable_pre_processing(
                     while let Ok(newer) = rx.try_recv() {
                         cam_raw = newer;
                     }
+                    // allow calibration to throttle expensive work or keep going every frame
                     let should_process = process_interval == 0
                         || (alive_cnt % process_interval == 0)
                         || last_processed_frame.is_none();
@@ -123,6 +130,8 @@ pub async fn runnable_pre_processing(
     }
 }
 
+/// Consume pre-processed frames, compute the bird's-eye projection and lane
+/// angle, and publish both the visualization and the numeric steering value.
 pub async fn runnable_get_lane_angle(
     id: &'static str,
     camera: CameraChannels,
@@ -172,6 +181,7 @@ pub async fn runnable_get_lane_angle(
                     while let Ok(newer) = rx.try_recv() {
                         cam_processed = newer;
                     }
+                    // reuse cached results when throttled by the calibration interval
                     let should_process = process_interval == 0
                         || (alive_cnt % process_interval == 0)
                         || last_birds_eye.is_none();
