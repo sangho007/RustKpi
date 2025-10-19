@@ -322,6 +322,9 @@ fn run_preview_thread(
         preview.raise();
         thread::sleep(Duration::from_millis(50));
     }
+    if let Some(preview) = raw_preview.as_mut() {
+        preview.raise();
+    }
 
     while running {
         match rx.recv_timeout(Duration::from_millis(16)) {
