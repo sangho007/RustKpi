@@ -1,6 +1,7 @@
 use crate::bsw::lib::cam_lib;
 use crate::rte::rte_dto::DtoCamRaw;
 use crate::rte::rte_main::CameraChannels;
+use opencv::prelude::VideoCaptureTrait;
 use opencv::{Result, videoio};
 use std::sync::Arc;
 use std::thread;
@@ -9,6 +10,8 @@ use tokio::sync::mpsc;
 use tokio::task;
 
 const CAPTURE_QUEUE_DEPTH: usize = 3;
+const LIBCAM_WIDTH: u32 = 1280;
+const LIBCAM_HEIGHT: u32 = 720;
 
 pub async fn ea_cam_provider(camera: CameraChannels) -> Result<()> {
     let CameraChannels { raw_tx, .. } = camera;
@@ -101,12 +104,16 @@ fn camera_capture_loop(frame_tx: mpsc::Sender<cam_lib::CapturedFrame>) -> Result
 }
 
 fn init_capture() -> Result<Box<dyn cam_lib::FrameCapture>> {
-    let cammode = false;
+    let cammode = true;
     if cammode {
-        let libcam = cam_lib::libcamera_capture::LibcameraCapture::new(1280, 720, 30)?;
+        let libcam =
+            cam_lib::libcamera_capture::LibcameraCapture::new(LIBCAM_WIDTH, LIBCAM_HEIGHT, 30)?;
         Ok(Box::new(libcam))
     } else {
-        let file_cap = videoio::VideoCapture::from_file("./video/challenge.mp4", videoio::CAP_ANY)?;
+        let mut file_cap =
+            videoio::VideoCapture::from_file("./video/challenge.mp4", videoio::CAP_ANY)?;
+        let _ = file_cap.set(videoio::CAP_PROP_FRAME_WIDTH, LIBCAM_WIDTH as f64);
+        let _ = file_cap.set(videoio::CAP_PROP_FRAME_HEIGHT, LIBCAM_HEIGHT as f64);
         Ok(Box::new(file_cap))
     }
 }

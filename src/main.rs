@@ -9,6 +9,7 @@ use crate::rte::rte_dto::*;
 use crate::rte::rte_main::RteSystem;
 use gui::sdl_env::SdlEnv;
 use gui::sdl_preview::SdlPreview;
+use opencv::core;
 use opencv::prelude::{MatTraitConst, MatTraitConstManual};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
@@ -21,6 +22,11 @@ async fn main() -> opencv::Result<()> {
     let camera_channels = channels.camera.clone();
     let ultrasonic_channels = channels.ultrasonic.clone();
     let _control_channels = channels.control.clone();
+
+    // Enable OpenCL acceleration paths if the platform supports it (no-op otherwise).
+    if let Err(err) = core::set_use_opencl(true) {
+        eprintln!("[INIT] Failed to enable OpenCL: {err}");
+    }
 
     // BSW Task 생성
     tokio::spawn(bsw::ecu_abs_cam::ea_cam_provider(camera_channels.clone()));

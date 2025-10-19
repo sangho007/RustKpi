@@ -346,6 +346,7 @@ pub mod libcamera_capture {
                 .ok_or_else(|| opencv_err("libcamera buffer size overflow"))?;
             let pool = BufferPool::new(buffer_len, 4);
             let color_format = match bytes_per_pixel {
+                1 => ColorFormat::Gray,
                 3 => ColorFormat::Rgb,
                 4 => ColorFormat::Rgba,
                 other => {

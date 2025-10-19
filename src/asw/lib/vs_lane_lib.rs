@@ -1,7 +1,7 @@
 use opencv::{
     Result,
     core::AlgorithmHint::ALGO_HINT_DEFAULT,
-    core::{self, CV_8UC1, CV_8UC3, DECOMP_LU, Mat, Point, Point2f, Scalar, Size, Vector},
+    core::{self, CV_8UC1, CV_8UC3, DECOMP_LU, Mat, Point, Point2f, Scalar, Size, UMat, Vector},
     highgui, imgproc,
     prelude::*,
     videoio,
@@ -239,8 +239,8 @@ impl Pipeline {
     /// - Rust에서 함수 호출 시 빌린 참조(&)를 사용합니다.
     ///   이는 C++의 레퍼런스와 유사하지만, Rust의 빌림 규칙(Borrow Checker)에 의해
     ///   컴파일 시점에 안전성이 보장됩니다.
-    pub(crate) fn gray_scale(&self, img: &Mat) -> Result<Mat> {
-        let mut gray = Mat::default();
+    pub(crate) fn gray_scale(&self, img: &Mat) -> Result<UMat> {
+        let mut gray = UMat::new_def();
         imgproc::cvt_color(
             img,
             &mut gray,
@@ -275,8 +275,8 @@ impl Pipeline {
     ///
     /// # Rust 문법 장점
     /// - `?`를 통해 에러가 자동 전파되므로, 각 단계별 에러 처리를 간결히 표현 가능합니다.
-    pub(crate) fn noise_removal(&self, img: &Mat) -> Result<Mat> {
-        let mut dst = Mat::default();
+    pub(crate) fn noise_removal(&self, img: &UMat) -> Result<UMat> {
+        let mut dst = UMat::new_def();
         imgproc::gaussian_blur(
             img,
             &mut dst,
@@ -296,8 +296,8 @@ impl Pipeline {
     ///
     /// # 반환
     /// * 엣지를 나타내는 이진(0/255) 영상
-    pub(crate) fn edge_detection(&self, img: &Mat) -> Result<Mat> {
-        let mut edges = Mat::default();
+    pub(crate) fn edge_detection(&self, img: &UMat) -> Result<UMat> {
+        let mut edges = UMat::new_def();
         imgproc::canny(img, &mut edges, 200.0, 350.0, 3, false)?;
         Ok(edges)
     }
@@ -309,9 +309,9 @@ impl Pipeline {
     ///
     /// # 반환
     /// * 닫힘(Closing) 처리된 영상
-    pub(crate) fn morphology_close(&self, img: &Mat) -> Result<Mat> {
+    pub(crate) fn morphology_close(&self, img: &UMat) -> Result<UMat> {
         let kernel = Mat::ones(3, 3, CV_8UC1)?.to_mat()?;
-        let mut dst = Mat::default();
+        let mut dst = UMat::new_def();
         imgproc::morphology_ex(
             img,
             &mut dst,
@@ -322,6 +322,18 @@ impl Pipeline {
             core::BORDER_CONSTANT,
             Scalar::default(),
         )?;
+        Ok(dst)
+    }
+
+    pub(crate) fn mat_to_umat(&self, img: &Mat) -> Result<UMat> {
+        let mut dst = UMat::new_def();
+        img.copy_to(&mut dst)?;
+        Ok(dst)
+    }
+
+    pub(crate) fn umat_to_mat(&self, img: &UMat) -> Result<Mat> {
+        let mut dst = Mat::default();
+        img.copy_to(&mut dst)?;
         Ok(dst)
     }
 
@@ -829,47 +841,59 @@ impl Pipeline {
         // -------------------------------------------
         // 3) 이전 차선 주변의 픽셀들만 선택
         // -------------------------------------------
-        let approx_capacity = (height.max(1) as usize).saturating_mul(margin.max(1) as usize);
-        let mut left_lane_points: Vec<(i32, i32)> = Vec::with_capacity(approx_capacity);
-        let mut right_lane_points: Vec<(i32, i32)> = Vec::with_capacity(approx_capacity);
+        let row_lane_points: Vec<(Vec<(i32, i32)>, Vec<(i32, i32)>)> = (0..height)
+            .into_par_iter()
+            .map(|y| {
+                let y_f64 = y as f64;
+                let leftx_center =
+                    left_fit_avg[0] * y_f64 * y_f64 + left_fit_avg[1] * y_f64 + left_fit_avg[2];
+                let rightx_center =
+                    right_fit_avg[0] * y_f64 * y_f64 + right_fit_avg[1] * y_f64 + right_fit_avg[2];
 
-        for y in 0..height {
-            let y_f64 = y as f64;
-            let leftx_center =
-                left_fit_avg[0] * y_f64 * y_f64 + left_fit_avg[1] * y_f64 + left_fit_avg[2];
-            let rightx_center =
-                right_fit_avg[0] * y_f64 * y_f64 + right_fit_avg[1] * y_f64 + right_fit_avg[2];
+                let left_search_low = (leftx_center - margin as f64).floor() as i32;
+                let left_search_high = (leftx_center + margin as f64).ceil() as i32;
+                let right_search_low = (rightx_center - margin as f64).floor() as i32;
+                let right_search_high = (rightx_center + margin as f64).ceil() as i32;
 
-            let left_search_low = (leftx_center - margin as f64).floor() as i32;
-            let left_search_high = (leftx_center + margin as f64).ceil() as i32;
-            let right_search_low = (rightx_center - margin as f64).floor() as i32;
-            let right_search_high = (rightx_center + margin as f64).ceil() as i32;
+                let row_start = y as usize * step;
+                let row_end = (row_start + step).min(data.len());
+                let row_slice = &data[row_start..row_end];
+                let usable_width = width_i32.min((row_end - row_start) as i32);
 
-            let row_start = y as usize * step;
-            let row_slice = &data[row_start..row_start + step];
-            let usable_width = width_i32.min(step as i32);
+                let mut left_lane_local: Vec<(i32, i32)> = Vec::new();
+                let mut right_lane_local: Vec<(i32, i32)> = Vec::new();
 
-            let left_low = left_search_low.clamp(0, usable_width);
-            let left_high = left_search_high.clamp(0, usable_width);
-            if left_low < left_high {
-                let slice = &row_slice[left_low as usize..left_high as usize];
-                for (offset, &pixel) in slice.iter().enumerate() {
-                    if pixel != 0 {
-                        left_lane_points.push((y, left_low + offset as i32));
+                let left_low = left_search_low.clamp(0, usable_width);
+                let left_high = left_search_high.clamp(0, usable_width);
+                if left_low < left_high {
+                    let slice = &row_slice[left_low as usize..left_high as usize];
+                    for (offset, &pixel) in slice.iter().enumerate() {
+                        if pixel != 0 {
+                            left_lane_local.push((y, left_low + offset as i32));
+                        }
                     }
                 }
-            }
 
-            let right_low = right_search_low.clamp(0, usable_width);
-            let right_high = right_search_high.clamp(0, usable_width);
-            if right_low < right_high {
-                let slice = &row_slice[right_low as usize..right_high as usize];
-                for (offset, &pixel) in slice.iter().enumerate() {
-                    if pixel != 0 {
-                        right_lane_points.push((y, right_low + offset as i32));
+                let right_low = right_search_low.clamp(0, usable_width);
+                let right_high = right_search_high.clamp(0, usable_width);
+                if right_low < right_high {
+                    let slice = &row_slice[right_low as usize..right_high as usize];
+                    for (offset, &pixel) in slice.iter().enumerate() {
+                        if pixel != 0 {
+                            right_lane_local.push((y, right_low + offset as i32));
+                        }
                     }
                 }
-            }
+
+                (left_lane_local, right_lane_local)
+            })
+            .collect();
+
+        let mut left_lane_points: Vec<(i32, i32)> = Vec::new();
+        let mut right_lane_points: Vec<(i32, i32)> = Vec::new();
+        for (mut left_local, mut right_local) in row_lane_points {
+            left_lane_points.append(&mut left_local);
+            right_lane_points.append(&mut right_local);
         }
 
         // -------------------------------------------
@@ -1237,9 +1261,10 @@ impl Pipeline {
 
         // 4) 모폴로지 닫힘
         let closed = self.morphology_close(&edges)?;
+        let closed_mat = self.umat_to_mat(&closed)?;
 
         // 5) ROI
-        let roi_img = self.roi(&closed)?;
+        let roi_img = self.roi(&closed_mat)?;
 
         // 6) Bird's-eye 투시 변환
         let birds_eye = self.perspective_transform(&roi_img)?;

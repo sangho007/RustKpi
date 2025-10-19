@@ -128,6 +128,8 @@ bool CameraBridge::init(uint32_t width,
     const std::vector<Candidate> candidates = {
         {width, height, libcamera::formats::BGR888, "requested BGR888"},
         {width, height, libcamera::formats::XRGB8888, "requested XRGB8888"},
+        {960, 540, libcamera::formats::BGR888, "fallback 960x540 BGR888"},
+        {960, 540, libcamera::formats::XRGB8888, "fallback 960x540 XRGB8888"},
         {1296, 972, libcamera::formats::BGR888, "fallback 1296x972 BGR888"},
         {1296, 972, libcamera::formats::XRGB8888, "fallback 1296x972 XRGB8888"},
         {640, 480, libcamera::formats::BGR888, "fallback 640x480 BGR888"},
