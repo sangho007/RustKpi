@@ -1,6 +1,6 @@
 # RustKpi
 
-자율주행 RC 카 플랫폼에서 **Classic AUTOSAR** 구조를 모사하며, Rust 기반으로 ADAS 핵심 기능을 실험하는 프로젝트입니다. 차선 유지 주행, 앞차 인지 시 차선 변경, 신호등 대응, 돌발 장애물 대응까지 최소 기능을 구현하고, 추후 C/C++ 버전과 비교해 언어별 장단점을 분석하는 것이 목표입니다.
+자율주행 RC 카 플랫폼에서 Classic AUTOSAR 계층(ASW/RTE/BSW)을 간소화해 모사하고, Rust 기반으로 ADAS 핵심 기능을 실험하는 프로젝트입니다. 차선 유지, 신호등 대응, 전방 장애물 대응을 우선 구현하고, 추후 C/C++ 포팅과 성능·안전성 비교를 목표로 합니다.
 
 ## 프로젝트 목표
 - Classic AUTOSAR 계층 구조(BSW ↔ RTE ↔ ASW)와 실행 흐름을 Rust로 재현
@@ -18,19 +18,19 @@
 ## 시스템 아키텍처
 ```
 ┌────────────────────────────────────┐
-│   Application Software (ASW)       │  Lane/Vision, Traffic Light, Foward Collision
+│   Application Software (ASW)       │ vs_lane, vs_trafficlight, forwardcollision_ultrasonic
 ├────────────────────────────────────┤
-│   Runtime Environment (RTE)        │  DTO, Broadcast Channel, Scheduling
+│   Runtime Environment (RTE)        │ DTO, Broadcast Channel, Scheduling
 ├────────────────────────────────────┤
-│   Basic Software (BSW)             │  Camera, Ultrasonic, PCA9685 Driver
+│   Basic Software (BSW)             │ Camera, Ultrasonic, PCA9685 (servo/DC)
 └────────────────────────────────────┘
 ```
 
 | 계층 | 주요 모듈 | 경로 |
 | --- | --- | --- |
-| ASW | `vs_lane`, `vs_trafficlight`, `uss_forwardcollision` | `src/asw/` |
-| RTE | `rte_main`, `rte_dto` | `src/rte/` |
-| BSW | `ecu_abs_cam`, `ecu_abs_ultrasonic`, `ecu_abs_pca9685`, `pca9685_lib` | `src/bsw/` |
+| ASW | `vs_lane`, `vs_trafficlight`, `forwardcollision_ultrasonic` | `src/asw/` |
+| RTE | `rte_main`, `rte_dto`, `lib` | `src/rte/` |
+| BSW | `ecu_abs_cam`, `ecu_abs_ultrasonic`, `ecu_abs_pwm`, `lib` | `src/bsw/` |
 
 ```
 src
@@ -53,48 +53,43 @@ src
 ├── rte
 │   ├── rte_dto.rs
 │   └── rte_main.rs
+├── main_runtime.rs
 └── main.rs
 
 ```
 
 ## AUTOSAR 적용 범위 & VFB 중심 접근
-- **Virtual Functional Bus(VFB)**: RTE와 DTO를 통해 소프트웨어 컴포넌트 간 인터페이스를 정형화하고, 실제 MCAL 부재 상황에서도 기능 검증이 가능하도록 했습니다.
-- **AUTOSAR 스택 단순화**: Classic AUTOSAR의 전체 스택을 구현하지 않고, 실험에 필요한 계층만 선별 적용했습니다. VFB와 BSW-ECU Abstraction에 집중하며, Complex Device Driver나 Diagnostics 등은 TODO로 남겨둡니다.
-- **BSW 구성 방식**: `ecu_abs_*` 모듈은 라즈베리파이 하드웨어를 대상으로 직접 작성한 ECU Abstraction입니다. Linux 사용자 공간 드라이버를 래핑하여 HAL에 가까운 API를 제공합니다.
-- **MCAL 처리 전략**: 실제 MCAL 드라이버는 포함되어 있지 않으며, 시스템 패키지로 설치되는 `libcamera`, `i2cdev`, `pwm_pca9685` 등 Linux 디바이스 드라이버를 MCAL 대체제로 사용합니다. 
+- VFB: RTE DTO와 Broadcast 채널로 SW 컴포넌트 간 인터페이스를 정형화합니다.
+- 스택 단순화: 실험에 필요한 계층만 사용하고 BSW ECU Abstraction에 집중합니다.
+- BSW: `ecu_abs_*` 모듈이 카메라/초음파/PCA9685 제어를 담당합니다.
+- MCAL: OS 디바이스 드라이버(`libcamera`, `i2cdev`, `pwm_pca9685`)를 대체 활용합니다.
 
 ## 소프트웨어 컴포넌트 (SWC) 개요
-- **Vision_LaneFollowing (`src/asw/vs_lane.rs`)**: 카메라 입력을 받아 전처리, 차선 검출, 조향각 계산까지 수행하며 VFB를 통해 조향 명령을 게시합니다.
-- **Vision_TrafficLight (`src/asw/vs_trafficlight.rs`)**: 신호등 색상/형태를 인식하여 차량 정지/출발 이벤트를 결정합니다. 색상 분류기 및 상태 머신 보강이 TODO입니다.
-- **UltraSonic_ForwardCollision (`src/asw/uss_forwardcollision.rs`)**: 초음파 센서 데이터를 장애물 DTO로 변환하고, 위험 거리 계산 후 제동 요청을 올립니다.
-- **Adas_ControlFusion (`src/asw` 예정)**: Lane, TrafficLight, FCA 결과를 통합하여 스티어링/구동 명령을 생성하는 통합 제어 SWC는 설계 단계입니다.
+- Vision_LaneFollowing (`src/asw/vs_lane.rs`): 전처리 → 투시 변환 → 슬라이딩 윈도우 → 조향각 계산. 칼만 필터 옵션 지원.
+- Vision_TrafficLight (`src/asw/vs_trafficlight.rs`): HSV + 모폴로지 + DBSCAN으로 신호색 판단.
+- UltraSonic_ForwardCollision (`src/asw/forwardcollision_ultrasonic.rs`): 거리 임계값 기반 장애물 이벤트 생성.
+- ADAS Control Fusion (`src/asw/adas.rs`): 설계/스켈레톤 단계(차후 Trajectory Planning 포함 예정).
 
 
 ### RTE 채널 흐름
-- 카메라: `raw_tx → processed_tx → bird_eye_tx → lane_angle_tx`
+- 카메라: `raw_tx → processed_tx → bird_eye_tx / lane_angle_tx`, `raw_tx → traffic_light_tx`
 - 초음파: `raw_tx → obstacle_tx`
-- 제어: `control_tx → servo_tx, dc_motor_tx`
+- 제어: `servo_tx`, `dc_motor_tx`
 
 Broadcast 채널을 활용하여 각 Task가 비동기적으로 데이터를 주고받으며, `tokio` 런타임이 전체 파이프라인을 구성합니다.
 
 ## 주요 구성 요소
-- **카메라 파이프라인 (`src/asw/vs_lane.rs`, `lib/vs_lane_lib.rs`)**  
-  전처리 → 버즈아이 변환 → 슬라이딩 윈도우 → 조향각 산출. Kalman Filter 옵션 지원.
-- **신호등 인지 (`src/asw/vs_trafficlight.rs`)**  
-  OpenCV 기반 색상/형태 필터링으로 신호 상태 추정. (세부 구현 진행 중)
-- **초음파 장애물 감지 (`src/asw/uss_obstacle.rs`)**  
-  Raw 데이터를 장애물 DTO로 변환하여 FCA 로직에 전달.
-- **ECU Abstraction (`src/bsw/ecu_abs_*.rs`)**  
-  카메라/초음파/PCA9685를 대상으로 한 자체 작성 BSW 계층. Linux 드라이버 호출을 캡슐화하여 AUTOSAR BSW 패턴에 맞춘 API를 제공합니다.
-- **PCA9685 제어 (`src/bsw/lib/pca9685_lib.rs`)**  
-  서보 각도 → PWM 변환, DC 모터 속도/방향 제어, 긴급 정지 API 제공.
-- **통합 실행 (`src/main.rs`)**  
-  시스템 초기화, Task 생성, 디버깅용 GUI (OpenCV HighGUI).
+**주요 구성 요소**
+- 카메라 파이프라인 (`src/asw/vs_lane.rs`, `src/asw/lib/vs_lane_lib.rs`): 전처리 → Bird's‑eye → 슬라이딩 윈도우 → 조향각. 칼만 필터 옵션.
+- 신호등 인지 (`src/asw/vs_trafficlight.rs`, `src/asw/lib/vs_trafficlight_lib.rs`): HSV → 모폴로지 → DBSCAN → 색 판단.
+- 초음파 장애물 감지 (`src/asw/forwardcollision_ultrasonic.rs`): 임계거리로 장애물 이벤트 생성.
+- ECU Abstraction (`src/bsw/ecu_abs_*.rs`): 카메라/초음파/PCA9685 제어.
+- PCA9685 유틸 (`src/bsw/lib/pwm_lib.rs`): 서보/모터 변환 및 제어 유틸.
+- 런타임/프리뷰 (`src/main_runtime.rs`, `src/util/preview_*`): SDL2 기반 다중 창 프리뷰(ESC/창 닫기 종료).
 
-### 카메라 해상도 & 캘리브레이션 프리셋
-- 기본 파이프라인은 4:3 비율의 640×480 해상도(`LaneCalibrationPreset::Vga640x480`)에 맞춰져 있습니다.  
-  `LaneCalibration::preset(LaneCalibrationPreset::Hd1280x720)`을 사용하면 기존 1280×720 파라미터 세트도 그대로 활용할 수 있습니다.
-- 샘플 영상 `video/challenge.mp4`는 16:9(1280×720)이므로, 아래 스크립트로 중앙 크롭+리사이즈한 버전을 생성하면 실제 카메라 해상도와 동일한 조건에서 테스트할 수 있습니다.
+### 카메라 해상도 & 캡처 모드
+- 기본 해상도는 VGA 640×480(`LaneCalibrationPreset::Vga640x480`)입니다.
+- 샘플 영상 `video/challenge.mp4`(16:9)를 사용하는 경우, 아래 스크립트로 중앙 크롭 후 640×480으로 리사이즈한 파일을 생성해 동일 조건에서 테스트할 수 있습니다.
 
 ```bash
 python tools/resize_video.py --input video/challenge.mp4 \
@@ -111,26 +106,37 @@ python tools/resize_video.py --input video/challenge.mp4 \
 
 
 ### 개발 환경 & Docker 개발 컨테이너
-- `docker/dockerfile`은 **2단계 멀티스테이지**로 구성되어, 빌더 단계에서 OpenCV 4.11.0, libcamera(next), rpicam-apps, kmsxx, Python 드라이버까지 라즈베리파이용으로 컴파일합니다.
-- 최종 이미지에는 런타임 라이브러리와 Rust toolchain, LLVM 17, Python 패키지만 포함하여 배포 환경을 최대한 가볍게 유지합니다.
-- 빌드는 `docker-buildx`를 이용해 `linux/arm64` 타깃으로 수행하며, 예시 명령은 다음과 같습니다.
+- `docker/dockerfile`은 멀티스테이지로 OpenCV/libcamera 등 의존성을 ARM64 타깃으로 빌드합니다.
+- 최종 이미지는 런타임 라이브러리와 Rust toolchain만 포함해 경량화합니다.
+- 예시 명령:
   ```bash
   docker-buildx build --platform linux/arm64 -t sangho007/rustkpi:latest --push .
   ```
 
 ### 크로스 컴파일 (라즈베리파이용)
-1. `rustup target add aarch64-unknown-linux-gnu`
-2. 크로스 컴파일 도구체인 설정 (`gcc-aarch64-linux-gnu` 등)
-3. `cargo build --release --target aarch64-unknown-linux-gnu`
+- `rustup target add aarch64-unknown-linux-gnu`
+- `gcc-aarch64-linux-gnu` 등 툴체인 설치 후:
+- `cargo build --release --target aarch64-unknown-linux-gnu`
+
+## 실행 방법
+- 데스크톱(샘플 비디오) 기본 실행:
+  - `cargo run --release`
+  - SDL2 프리뷰 창이 뜨며 ESC 또는 창 닫기로 종료합니다.
+- 실제 카메라(libcamera) 사용:
+  - 캡처 모드는 `CameraCalibration::default().use_libcamera`에 의해 결정됩니다(현재 기본 false).
+  - 필요 시 코드의 기본값(또는 HD 프리셋)에서 `use_libcamera = true`로 전환하세요.
+
+## 의존성(로컬 실행)
+- 시스템 패키지: OpenCV 런타임, SDL2 개발 패키지(예: Ubuntu `libsdl2-dev`)
+- Rust 크레이트: `tokio`, `opencv`, `sdl2`, `rayon`, `dbscan`, `hc-sr04`, `linux-embedded-hal`, `pwm-pca9685`
 
 ## 향후 개선점
-- [ ] Trajectory Planning 및 Lane Change 의사결정 SWC 구현
-- [ ] LCA용 주변 차량 인지 로직 (추가 센서 연동)
-- [ ] 2D 데이터맵 기반 신호등 인지 성능 향상 및 다중 교차로 시나리오 지원
-- [ ] FCA 대응 시 감속 프로파일 및 경고 HMI 모듈 구현
-- [ ] AUTOSAR 서비스 계층 (Diagnostics, NvM) 최소 기능 도입
-- [ ] C/C++ 포팅 후 성능·안전성 비교 리포트 작성
-- [ ] Posix 지원 Yocto 포팅 
+- [ ] ADAS Control Fusion 러너블 구현 및 Trajectory Planning(순수추종/Stanley)
+- [ ] LCA를 위한 주변 객체 인지(추가 센서/비전)
+- [ ] 신호등/정지선 거리 추정, 정지/출발 속도 프로파일
+- [ ] AUTOSAR 서비스 계층(Diagnostics, NvM) 일부 도입
+- [ ] C/C++ 포팅 후 성능·안전성 비교 리포트
+- [ ] Yocto 기반 배포 이미지
 
 ## Rust vs C/C++ 비교 계획 
 - **안전성:** 메모리 안전, 데이터 레이스 방지

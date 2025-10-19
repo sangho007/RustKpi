@@ -88,6 +88,14 @@ async fn main() -> opencv::Result<()> {
         }));
     }
 
+    // ADAS Lateral Control Task
+    {
+        let chans = channels.clone();
+        tasks.push(tokio::spawn(async move {
+            asw::adas_control::runnable_adas_lateral("ADAS-Lateral", chans).await;
+        }));
+    }
+
     // GUI 및 신호 처리 루프를 실행한다.
     let result = main_runtime::run(channels).await;
 
