@@ -68,6 +68,9 @@ async fn main() -> opencv::Result<()> {
     let mut raw_preview: Option<SdlPreview> = None;
     let mut processed_preview: Option<SdlPreview> = None;
     let mut birds_eye_preview: Option<SdlPreview> = None;
+    let mut raw_preview_enabled = true;
+    let mut processed_preview_enabled = true;
+    let mut birds_eye_preview_enabled = true;
     let mut sdl_env = if DEBUG_ON { Some(SdlEnv::new()?) } else { None };
 
     // Main 스레드에서 GUI 이벤트 루프 실행
@@ -158,7 +161,9 @@ async fn main() -> opencv::Result<()> {
                 None => continue,
             };
 
-            if let Some(frame) = &latest_raw_frame {
+            if !raw_preview_enabled {
+                raw_preview = None;
+            } else if let Some(frame) = &latest_raw_frame {
                 if raw_preview.is_none() {
                     raw_preview = Some(SdlPreview::new(
                         &env.video,
@@ -180,7 +185,9 @@ async fn main() -> opencv::Result<()> {
                 }
             }
 
-            if let Some(processed) = &latest_processed_frame {
+            if !processed_preview_enabled {
+                processed_preview = None;
+            } else if let Some(processed) = &latest_processed_frame {
                 let mat = processed.img.as_ref();
                 let data = mat.data_bytes()?;
                 let stride = mat.step1(0)? as usize;
@@ -206,7 +213,9 @@ async fn main() -> opencv::Result<()> {
                 }
             }
 
-            if let Some(birds_eye) = &latest_birds_eye_frame {
+            if !birds_eye_preview_enabled {
+                birds_eye_preview = None;
+            } else if let Some(birds_eye) = &latest_birds_eye_frame {
                 let mat = birds_eye.img.as_ref();
                 let data = mat.data_bytes()?;
                 let stride = mat.step1(0)? as usize;
@@ -239,12 +248,76 @@ async fn main() -> opencv::Result<()> {
                     | Event::KeyDown {
                         keycode: Some(Keycode::Escape),
                         ..
-                    }
-                    | Event::Window {
-                        win_event: WindowEvent::Close,
-                        ..
                     } => {
                         should_quit = true;
+                    }
+                    Event::KeyDown {
+                        keycode: Some(Keycode::R),
+                        ..
+                    } => {
+                        raw_preview_enabled = !raw_preview_enabled;
+                        raw_preview = None;
+                        println!(
+                            "[GUI] Raw preview {}",
+                            if raw_preview_enabled {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            }
+                        );
+                    }
+                    Event::KeyDown {
+                        keycode: Some(Keycode::P),
+                        ..
+                    } => {
+                        processed_preview_enabled = !processed_preview_enabled;
+                        processed_preview = None;
+                        println!(
+                            "[GUI] Processed preview {}",
+                            if processed_preview_enabled {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            }
+                        );
+                    }
+                    Event::KeyDown {
+                        keycode: Some(Keycode::B),
+                        ..
+                    } => {
+                        birds_eye_preview_enabled = !birds_eye_preview_enabled;
+                        birds_eye_preview = None;
+                        println!(
+                            "[GUI] Bird's eye preview {}",
+                            if birds_eye_preview_enabled {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            }
+                        );
+                    }
+                    Event::Window {
+                        win_event: WindowEvent::Close,
+                        window_id,
+                        ..
+                    } => {
+                        if raw_preview.as_ref().map(|p| p.window_id()) == Some(window_id) {
+                            raw_preview = None;
+                            raw_preview_enabled = false;
+                            println!("[GUI] Raw preview window closed");
+                        } else if processed_preview.as_ref().map(|p| p.window_id())
+                            == Some(window_id)
+                        {
+                            processed_preview = None;
+                            processed_preview_enabled = false;
+                            println!("[GUI] Processed preview window closed");
+                        } else if birds_eye_preview.as_ref().map(|p| p.window_id())
+                            == Some(window_id)
+                        {
+                            birds_eye_preview = None;
+                            birds_eye_preview_enabled = false;
+                            println!("[GUI] Bird's eye preview window closed");
+                        }
                     }
                     _ => {}
                 }

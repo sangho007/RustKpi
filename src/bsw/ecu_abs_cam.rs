@@ -3,6 +3,8 @@ use crate::rte::rte_dto::DtoCamRaw;
 use crate::rte::rte_main::CameraChannels;
 use opencv::{Result, videoio};
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task;
 
@@ -59,39 +61,52 @@ pub async fn ea_cam_provider(camera: CameraChannels) -> Result<()> {
 }
 
 fn camera_capture_loop(frame_tx: mpsc::Sender<cam_lib::CapturedFrame>) -> Result<()> {
-    // 비디오 파일이나 카메라 장치를 엽니다.
-    let cammode = true;
-    let mut cap: Box<dyn cam_lib::FrameCapture> = if cammode {
-        let libcam =
-            cam_lib::libcamera_capture::LibcameraCapture::new(1280, 720, 30).map_err(|e| {
-                opencv::Error::new(
-                    opencv::core::StsError,
-                    format!("Failed to initialize libcamera: {}", e),
-                )
-            })?;
-        Box::new(libcam)
-    } else {
-        let file_cap = videoio::VideoCapture::from_file("./video/challenge.mp4", videoio::CAP_ANY)?;
-        Box::new(file_cap)
-    };
-
     loop {
-        match cap.read_frame() {
-            Ok(Some(captured)) => {
-                if frame_tx.blocking_send(captured).is_err() {
+        let mut cap = match init_capture() {
+            Ok(cap) => cap,
+            Err(e) => {
+                eprintln!("[bsw] camera init failed: {e:?}. retrying...");
+                if frame_tx.is_closed() {
+                    return Ok(());
+                }
+                thread::sleep(Duration::from_millis(500));
+                continue;
+            }
+        };
+
+        loop {
+            match cap.read_frame() {
+                Ok(Some(captured)) => {
+                    if frame_tx.blocking_send(captured).is_err() {
+                        return Ok(());
+                    }
+                }
+                Ok(None) => {
+                    println!("[bsw] 비디오 스트림 종료. 재시도합니다.");
+                    break;
+                }
+                Err(e) => {
+                    eprintln!("[bsw] 프레임 읽기 실패: {e:?}. 캡처를 재시도합니다.");
                     break;
                 }
             }
-            Ok(None) => {
-                println!("[bsw] 비디오 스트림 종료.");
-                break;
-            }
-            Err(e) => {
-                eprintln!("[bsw] 에러: 프레임 읽기 실패: {:?}", e);
-                return Err(e);
-            }
         }
-    }
 
-    Ok(())
+        if frame_tx.is_closed() {
+            return Ok(());
+        }
+
+        thread::sleep(Duration::from_millis(500));
+    }
+}
+
+fn init_capture() -> Result<Box<dyn cam_lib::FrameCapture>> {
+    let cammode = true;
+    if cammode {
+        let libcam = cam_lib::libcamera_capture::LibcameraCapture::new(1280, 720, 30)?;
+        Ok(Box::new(libcam))
+    } else {
+        let file_cap = videoio::VideoCapture::from_file("./video/challenge.mp4", videoio::CAP_ANY)?;
+        Ok(Box::new(file_cap))
+    }
 }
