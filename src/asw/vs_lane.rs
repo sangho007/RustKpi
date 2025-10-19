@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::RecvError;
 
-const PROCESS_INTERVAL: u32 = 1;
+const PROCESS_INTERVAL: u32 = 3;
 
 pub async fn runnable_pre_processing(
     id: &'static str,
