@@ -15,7 +15,9 @@ use opencv::core::Mat;
 use opencv::prelude::{MatTraitConst, MatTraitConstManual};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
-use std::sync::Arc;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 use tokio::{select, sync::broadcast::error::RecvError};
 
 fn mat_color_format(mat: &Mat) -> ColorFormat {
@@ -30,6 +32,24 @@ fn mat_color_format(mat: &Mat) -> ColorFormat {
     }
 }
 
+struct FramePacket {
+    width: u32,
+    height: u32,
+    stride: usize,
+    format: ColorFormat,
+    data: Vec<u8>,
+}
+
+enum PreviewMessage {
+    Raw(FramePacket),
+    Processed(FramePacket),
+    Bird(FramePacket),
+}
+
+enum PreviewEvent {
+    Quit,
+}
+
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> opencv::Result<()> {
     let RteSystem { channels } = rte::rte_main::init();
@@ -37,22 +57,11 @@ async fn main() -> opencv::Result<()> {
     let ultrasonic_channels = channels.ultrasonic.clone();
     let _control_channels = channels.control.clone();
 
-    // Enable OpenCL acceleration paths if the platform supports it (no-op otherwise).
     if let Err(err) = core::set_use_opencl(true) {
         eprintln!("[INIT] Failed to enable OpenCL: {err}");
     }
 
-    // BSW Task 생성
     tokio::spawn(bsw::ecu_abs_cam::ea_cam_provider(camera_channels.clone()));
-    // tokio::spawn(bsw::ecu_abs_ultrasonic::ea_ultrasonic_provider(
-    //     ultrasonic_channels.clone(),
-    // ));
-    // tokio::spawn(bsw::ecu_abs_pwm::ea_pca9685_actuator(
-    //     "MotorControl",
-    //     control_channels.clone(),
-    // ));
-
-    // ASW Task 생성
     tokio::spawn(asw::vs_lane::runnable_pre_processing(
         "PreProcess",
         camera_channels.clone(),
@@ -61,19 +70,31 @@ async fn main() -> opencv::Result<()> {
         "LaneAngle",
         camera_channels.clone(),
     ));
-    // tokio::spawn(asw::forwardcollision_ultrasonic::runnable_obstacle_detection(
-    //     "UssObstacle",
-    //     ultrasonic_channels.clone(),
-    // ));
-    // tokio::spawn(asw::vs_trafficlight::runnable_trafficlight_detection(
-    //     "TrafficLightDetection",
-    //     camera_channels.clone(),
-    // ));
 
-    // 디버깅용 코드
     println!("== 시스템 실행 중... (GUI 창에서 'q'를 누르면 종료) ==");
 
-    const DEBUG_ON: bool = false;
+    const DEBUG_ON: bool = true;
+
+    let (mut preview_tx, mut preview_event_rx, preview_handle) = if DEBUG_ON {
+        let (tx, rx) = mpsc::channel::<PreviewMessage>();
+        let (event_tx, event_rx) = mpsc::channel::<PreviewEvent>();
+        let handle = thread::Builder::new()
+            .name("sdl-preview".to_string())
+            .spawn(move || {
+                if let Err(err) = run_preview_thread(rx, event_tx) {
+                    eprintln!("[GUI] preview thread error: {}", err);
+                }
+            })
+            .map_err(|e| {
+                opencv::Error::new(
+                    opencv::core::StsError,
+                    format!("Failed to spawn preview thread: {}", e),
+                )
+            })?;
+        (Some(tx), Some(event_rx), Some(handle))
+    } else {
+        (None, None, None)
+    };
 
     let mut camraw_rx = camera_channels.raw_tx.subscribe();
     let mut processed_rx = camera_channels.processed_tx.subscribe();
@@ -81,19 +102,6 @@ async fn main() -> opencv::Result<()> {
     let mut lane_angle_rx = camera_channels.lane_angle_tx.subscribe();
     let mut distance_rx = ultrasonic_channels.raw_tx.subscribe();
 
-    // 각 창에 표시할 최신 프레임을 저장할 변수 (루프 외부에 선언)
-    let mut latest_raw_frame: Option<Arc<DtoCamRaw>> = None;
-    let mut latest_processed_frame: Option<Arc<DtoCamProcessed>> = None;
-    let mut latest_birds_eye_frame: Option<Arc<DtoCamBirdEyeView>> = None;
-    let mut raw_preview: Option<SdlPreview> = None;
-    let mut processed_preview: Option<SdlPreview> = None;
-    let mut birds_eye_preview: Option<SdlPreview> = None;
-    let mut raw_preview_enabled = true;
-    let mut processed_preview_enabled = true;
-    let mut birds_eye_preview_enabled = true;
-    let mut sdl_env = if DEBUG_ON { Some(SdlEnv::new()?) } else { None };
-
-    // Main 스레드에서 GUI 이벤트 루프 실행
     'main_loop: loop {
         select! {
             biased;
@@ -103,7 +111,16 @@ async fn main() -> opencv::Result<()> {
                     while let Ok(newer) = camraw_rx.try_recv() {
                         newest = newer;
                     }
-                    latest_raw_frame = Some(newest);
+                    if let Some(tx) = preview_tx.as_ref() {
+                        let payload = FramePacket {
+                            width: newest.width,
+                            height: newest.height,
+                            stride: newest.stride,
+                            format: newest.color_format,
+                            data: newest.buffer.as_slice().to_vec(),
+                        };
+                        let _ = tx.send(PreviewMessage::Raw(payload));
+                    }
                 }
                 Err(RecvError::Lagged(n)) => {
                     eprintln!("[MAIN] raw frame lagged by {}", n);
@@ -119,7 +136,24 @@ async fn main() -> opencv::Result<()> {
                     while let Ok(newer) = processed_rx.try_recv() {
                         newest = newer;
                     }
-                    latest_processed_frame = Some(newest);
+                    if let Some(tx) = preview_tx.as_ref() {
+                        let mat = newest.img.as_ref();
+                        match (mat.data_bytes(), mat.step1(0)) {
+                            (Ok(data), Ok(stride)) => {
+                                let format = mat_color_format(mat);
+                                let payload = FramePacket {
+                                    width: newest.width,
+                                    height: newest.height,
+                                    stride: stride as usize,
+                                    format,
+                                    data: data.to_vec(),
+                                };
+                                let _ = tx.send(PreviewMessage::Processed(payload));
+                            }
+                            (Err(err), _) => eprintln!("[GUI] Failed to read processed data: {}", err),
+                            (_, Err(err)) => eprintln!("[GUI] Failed to read processed stride: {}", err),
+                        }
+                    }
                 }
                 Err(RecvError::Lagged(n)) => {
                     eprintln!("[MAIN] Processed frame lagged by {}", n);
@@ -135,7 +169,24 @@ async fn main() -> opencv::Result<()> {
                     while let Ok(newer) = birds_eye_rx.try_recv() {
                         newest = newer;
                     }
-                    latest_birds_eye_frame = Some(newest);
+                    if let Some(tx) = preview_tx.as_ref() {
+                        let mat = newest.img.as_ref();
+                        match (mat.data_bytes(), mat.step1(0)) {
+                            (Ok(data), Ok(stride)) => {
+                                let format = mat_color_format(mat);
+                                let payload = FramePacket {
+                                    width: newest.width,
+                                    height: newest.height,
+                                    stride: stride as usize,
+                                    format,
+                                    data: data.to_vec(),
+                                };
+                                let _ = tx.send(PreviewMessage::Bird(payload));
+                            }
+                            (Err(err), _) => eprintln!("[GUI] Failed to read bird-eye data: {}", err),
+                            (_, Err(err)) => eprintln!("[GUI] Failed to read bird-eye stride: {}", err),
+                        }
+                    }
                 }
                 Err(RecvError::Lagged(n)) => {
                     eprintln!("[MAIN] Bird eye stream lagged by {}", n);
@@ -171,178 +222,215 @@ async fn main() -> opencv::Result<()> {
             }
         }
 
-        if DEBUG_ON {
-            while let Ok(newer) = camraw_rx.try_recv() {
-                latest_raw_frame = Some(newer);
-            }
-
-            let env = match sdl_env.as_mut() {
-                Some(env) => env,
-                None => continue,
-            };
-
-            if !raw_preview_enabled {
-                raw_preview = None;
-            } else if let Some(frame) = &latest_raw_frame {
-                if raw_preview.is_none() {
-                    raw_preview = Some(SdlPreview::new(
-                        &env.video,
-                        "Raw View",
-                        frame.width,
-                        frame.height,
-                        frame.color_format,
-                    )?);
-                }
-
-                if let Some(preview) = raw_preview.as_mut() {
-                    preview.present(
-                        frame.width,
-                        frame.height,
-                        frame.color_format,
-                        frame.buffer.as_slice(),
-                        frame.stride,
-                    )?;
-                }
-            }
-
-            if !processed_preview_enabled {
-                processed_preview = None;
-            } else if let Some(processed) = &latest_processed_frame {
-                let mat = processed.img.as_ref();
-                let data = mat.data_bytes()?;
-                let stride = mat.step1(0)? as usize;
-                let format = mat_color_format(mat);
-
-                if processed_preview.is_none() {
-                    processed_preview = Some(SdlPreview::new(
-                        &env.video,
-                        "Processed View",
-                        processed.width,
-                        processed.height,
-                        format,
-                    )?);
-                }
-
-                if let Some(preview) = processed_preview.as_mut() {
-                    preview.present(processed.width, processed.height, format, data, stride)?;
-                }
-            }
-
-            if !birds_eye_preview_enabled {
-                birds_eye_preview = None;
-            } else if let Some(birds_eye) = &latest_birds_eye_frame {
-                let mat = birds_eye.img.as_ref();
-                let data = mat.data_bytes()?;
-                let stride = mat.step1(0)? as usize;
-                let format = mat_color_format(mat);
-
-                if birds_eye_preview.is_none() {
-                    birds_eye_preview = Some(SdlPreview::new(
-                        &env.video,
-                        "Bird's Eye View",
-                        birds_eye.width,
-                        birds_eye.height,
-                        format,
-                    )?);
-                }
-
-                if let Some(preview) = birds_eye_preview.as_mut() {
-                    preview.present(birds_eye.width, birds_eye.height, format, data, stride)?;
-                }
-            }
-
-            let mut should_quit = false;
-            for event in env.event_pump.poll_iter() {
-                match event {
-                    Event::Quit { .. }
-                    | Event::KeyDown {
-                        keycode: Some(Keycode::Escape),
-                        ..
-                    } => {
-                        should_quit = true;
-                    }
-                    Event::KeyDown {
-                        keycode: Some(Keycode::R),
-                        ..
-                    } => {
-                        raw_preview_enabled = !raw_preview_enabled;
-                        raw_preview = None;
-                        println!(
-                            "[GUI] Raw preview {}",
-                            if raw_preview_enabled {
-                                "enabled"
-                            } else {
-                                "disabled"
-                            }
-                        );
-                    }
-                    Event::KeyDown {
-                        keycode: Some(Keycode::P),
-                        ..
-                    } => {
-                        processed_preview_enabled = !processed_preview_enabled;
-                        processed_preview = None;
-                        println!(
-                            "[GUI] Processed preview {}",
-                            if processed_preview_enabled {
-                                "enabled"
-                            } else {
-                                "disabled"
-                            }
-                        );
-                    }
-                    Event::KeyDown {
-                        keycode: Some(Keycode::B),
-                        ..
-                    } => {
-                        birds_eye_preview_enabled = !birds_eye_preview_enabled;
-                        birds_eye_preview = None;
-                        println!(
-                            "[GUI] Bird's eye preview {}",
-                            if birds_eye_preview_enabled {
-                                "enabled"
-                            } else {
-                                "disabled"
-                            }
-                        );
-                    }
-                    Event::Window {
-                        win_event: WindowEvent::Close,
-                        window_id,
-                        ..
-                    } => {
-                        if raw_preview.as_ref().map(|p| p.window_id()) == Some(window_id) {
-                            raw_preview = None;
-                            raw_preview_enabled = false;
-                            println!("[GUI] Raw preview window closed");
-                        } else if processed_preview.as_ref().map(|p| p.window_id())
-                            == Some(window_id)
-                        {
-                            processed_preview = None;
-                            processed_preview_enabled = false;
-                            println!("[GUI] Processed preview window closed");
-                        } else if birds_eye_preview.as_ref().map(|p| p.window_id())
-                            == Some(window_id)
-                        {
-                            birds_eye_preview = None;
-                            birds_eye_preview_enabled = false;
-                            println!("[GUI] Bird's eye preview window closed");
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            if should_quit {
-                break;
+        if let Some(event_rx) = preview_event_rx.as_mut() {
+            if let Ok(PreviewEvent::Quit) = event_rx.try_recv() {
+                break 'main_loop;
             }
         }
     }
 
-    println!("== 시스템 실행 중... (Ctrl+C로 종료) ==");
-    tokio::signal::ctrl_c()
-        .await
-        .expect("Ctrl-C 핸들러 설정 실패");
-    println!("\n== 시뮬레이션 종료 ==");
+    if let Some(tx) = preview_tx.take() {
+        drop(tx);
+    }
+    if let Some(handle) = preview_handle {
+        let _ = handle.join();
+    }
+
+    println!("== 시뮬레이션 종료 ==");
     Ok(())
+}
+
+fn run_preview_thread(
+    rx: mpsc::Receiver<PreviewMessage>,
+    event_tx: mpsc::Sender<PreviewEvent>,
+) -> opencv::Result<()> {
+    let mut env = SdlEnv::new()?;
+    let mut raw_preview: Option<SdlPreview> = None;
+    let mut processed_preview: Option<SdlPreview> = None;
+    let mut birds_eye_preview: Option<SdlPreview> = None;
+    let mut raw_enabled = true;
+    let mut processed_enabled = true;
+    let mut birds_enabled = true;
+    let mut running = true;
+
+    while running {
+        match rx.recv_timeout(Duration::from_millis(16)) {
+            Ok(msg) => {
+                handle_preview_message(
+                    msg,
+                    &mut raw_preview,
+                    &mut processed_preview,
+                    &mut birds_eye_preview,
+                    &mut raw_enabled,
+                    &mut processed_enabled,
+                    &mut birds_enabled,
+                    &env,
+                );
+                while let Ok(msg) = rx.try_recv() {
+                    handle_preview_message(
+                        msg,
+                        &mut raw_preview,
+                        &mut processed_preview,
+                        &mut birds_eye_preview,
+                        &mut raw_enabled,
+                        &mut processed_enabled,
+                        &mut birds_enabled,
+                        &env,
+                    );
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+
+        for event in env.event_pump.poll_iter() {
+            match event {
+                Event::Quit { .. }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => {
+                    let _ = event_tx.send(PreviewEvent::Quit);
+                    running = false;
+                    break;
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::R),
+                    ..
+                } => {
+                    raw_enabled = !raw_enabled;
+                    raw_preview = None;
+                    println!(
+                        "[GUI] Raw preview {}",
+                        if raw_enabled { "enabled" } else { "disabled" }
+                    );
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::P),
+                    ..
+                } => {
+                    processed_enabled = !processed_enabled;
+                    processed_preview = None;
+                    println!(
+                        "[GUI] Processed preview {}",
+                        if processed_enabled {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    );
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::B),
+                    ..
+                } => {
+                    birds_enabled = !birds_enabled;
+                    birds_eye_preview = None;
+                    println!(
+                        "[GUI] Bird's eye preview {}",
+                        if birds_enabled { "enabled" } else { "disabled" }
+                    );
+                }
+                Event::Window {
+                    win_event: WindowEvent::Close,
+                    window_id,
+                    ..
+                } => {
+                    if raw_preview.as_ref().map(|p| p.window_id()) == Some(window_id) {
+                        raw_preview = None;
+                        raw_enabled = false;
+                        println!("[GUI] Raw preview window closed");
+                    } else if processed_preview.as_ref().map(|p| p.window_id()) == Some(window_id) {
+                        processed_preview = None;
+                        processed_enabled = false;
+                        println!("[GUI] Processed preview window closed");
+                    } else if birds_eye_preview.as_ref().map(|p| p.window_id()) == Some(window_id) {
+                        birds_eye_preview = None;
+                        birds_enabled = false;
+                        println!("[GUI] Bird's eye preview window closed");
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_preview_message(
+    msg: PreviewMessage,
+    raw_preview: &mut Option<SdlPreview>,
+    processed_preview: &mut Option<SdlPreview>,
+    birds_eye_preview: &mut Option<SdlPreview>,
+    raw_enabled: &mut bool,
+    processed_enabled: &mut bool,
+    birds_enabled: &mut bool,
+    env: &SdlEnv,
+) {
+    match msg {
+        PreviewMessage::Raw(frame) => {
+            if !*raw_enabled {
+                return;
+            }
+            ensure_preview(raw_preview, env, "Raw View", &frame);
+            if let Some(preview) = raw_preview.as_mut() {
+                if let Err(err) = preview.present(
+                    frame.width,
+                    frame.height,
+                    frame.format,
+                    &frame.data,
+                    frame.stride,
+                ) {
+                    eprintln!("[GUI] Failed to present raw frame: {}", err);
+                }
+            }
+        }
+        PreviewMessage::Processed(frame) => {
+            if !*processed_enabled {
+                return;
+            }
+            ensure_preview(processed_preview, env, "Processed View", &frame);
+            if let Some(preview) = processed_preview.as_mut() {
+                if let Err(err) = preview.present(
+                    frame.width,
+                    frame.height,
+                    frame.format,
+                    &frame.data,
+                    frame.stride,
+                ) {
+                    eprintln!("[GUI] Failed to present processed frame: {}", err);
+                }
+            }
+        }
+        PreviewMessage::Bird(frame) => {
+            if !*birds_enabled {
+                return;
+            }
+            ensure_preview(birds_eye_preview, env, "Bird's Eye View", &frame);
+            if let Some(preview) = birds_eye_preview.as_mut() {
+                if let Err(err) = preview.present(
+                    frame.width,
+                    frame.height,
+                    frame.format,
+                    &frame.data,
+                    frame.stride,
+                ) {
+                    eprintln!("[GUI] Failed to present bird's-eye frame: {}", err);
+                }
+            }
+        }
+    }
+}
+
+fn ensure_preview(target: &mut Option<SdlPreview>, env: &SdlEnv, title: &str, frame: &FramePacket) {
+    if target.is_none() {
+        match SdlPreview::new(&env.video, title, frame.width, frame.height, frame.format) {
+            Ok(preview) => *target = Some(preview),
+            Err(err) => {
+                eprintln!("[GUI] Failed to create preview '{}': {}", title, err);
+                *target = None;
+            }
+        }
+    }
 }
