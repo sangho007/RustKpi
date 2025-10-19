@@ -101,7 +101,7 @@ fn camera_capture_loop(frame_tx: mpsc::Sender<cam_lib::CapturedFrame>) -> Result
 }
 
 fn init_capture() -> Result<Box<dyn cam_lib::FrameCapture>> {
-    let cammode = true;
+    let cammode = false;
     if cammode {
         let libcam = cam_lib::libcamera_capture::LibcameraCapture::new(1280, 720, 30)?;
         Ok(Box::new(libcam))
