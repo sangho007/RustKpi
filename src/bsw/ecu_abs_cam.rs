@@ -74,7 +74,7 @@ pub async fn ea_cam_provider(camera: CameraChannels) -> Result<()> {
 /// initialise the selected capture backend and pushes frames onto the channel
 /// until the receiver goes away.
 fn camera_capture_loop(frame_tx: mpsc::Sender<cam_lib::CapturedFrame>) -> Result<()> {
-    let mut last_frame_sent: Option<Instant> = None;
+    let mut next_frame_due = Instant::now();
     let frame_interval = Duration::from_nanos(FRAME_INTERVAL_NS);
     // 계속해서 캡처 백엔드를 재초기화해 스트림 끊김에 대응한다.
     loop {
@@ -93,16 +93,16 @@ fn camera_capture_loop(frame_tx: mpsc::Sender<cam_lib::CapturedFrame>) -> Result
         loop {
             match cap.read_frame() {
                 Ok(Some(captured)) => {
-                    if let Some(last) = last_frame_sent {
-                        let elapsed = last.elapsed();
-                        if elapsed < frame_interval {
-                            thread::sleep(frame_interval - elapsed);
-                        }
+                    let now = Instant::now();
+                    if now < next_frame_due {
+                        thread::sleep(next_frame_due - now);
+                    } else {
+                        next_frame_due = now;
                     }
                     if frame_tx.blocking_send(captured).is_err() {
                         return Ok(());
                     }
-                    last_frame_sent = Some(Instant::now());
+                    next_frame_due += frame_interval;
                 }
                 Ok(None) => {
                     println!("[bsw] 비디오 스트림 종료. 재시도합니다.");
