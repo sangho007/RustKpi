@@ -264,34 +264,61 @@ fn run_preview_thread(
     let mut birds_enabled = true;
     let mut running = true;
 
+    let mut pending_raw: Option<FramePacket> = None;
+    let mut pending_processed: Option<FramePacket> = None;
+    let mut pending_bird: Option<FramePacket> = None;
+
     while running {
         match rx.recv_timeout(Duration::from_millis(16)) {
             Ok(msg) => {
-                handle_preview_message(
+                update_pending_messages(
                     msg,
-                    &mut raw_preview,
-                    &mut processed_preview,
-                    &mut birds_eye_preview,
-                    &mut raw_enabled,
-                    &mut processed_enabled,
-                    &mut birds_enabled,
-                    &env,
+                    &mut pending_raw,
+                    &mut pending_processed,
+                    &mut pending_bird,
                 );
                 while let Ok(msg) = rx.try_recv() {
-                    handle_preview_message(
+                    update_pending_messages(
                         msg,
-                        &mut raw_preview,
-                        &mut processed_preview,
-                        &mut birds_eye_preview,
-                        &mut raw_enabled,
-                        &mut processed_enabled,
-                        &mut birds_enabled,
-                        &env,
+                        &mut pending_raw,
+                        &mut pending_processed,
+                        &mut pending_bird,
                     );
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+
+        if raw_enabled {
+            if let Some(packet) = pending_raw.take() {
+                if ensure_preview(&mut raw_preview, &env, "Raw View", &packet).is_ok() {
+                    present_packet(raw_preview.as_mut(), &packet);
+                }
+            }
+        } else {
+            raw_preview = None;
+        }
+
+        if processed_enabled {
+            if let Some(packet) = pending_processed.take() {
+                if ensure_preview(&mut processed_preview, &env, "Processed View", &packet).is_ok() {
+                    present_packet(processed_preview.as_mut(), &packet);
+                }
+            }
+        } else {
+            processed_preview = None;
+        }
+
+        if birds_enabled {
+            if let Some(packet) = pending_bird.take() {
+                if ensure_preview(&mut birds_eye_preview, &env, "Bird's Eye View", &packet).is_ok()
+                {
+                    present_packet(birds_eye_preview.as_mut(), &packet);
+                }
+            }
+        } else {
+            birds_eye_preview = None;
         }
 
         for event in env.event_pump.poll_iter() {
@@ -369,79 +396,42 @@ fn run_preview_thread(
     Ok(())
 }
 
-fn handle_preview_message(
+fn update_pending_messages(
     msg: PreviewMessage,
-    raw_preview: &mut Option<SdlPreview>,
-    processed_preview: &mut Option<SdlPreview>,
-    birds_eye_preview: &mut Option<SdlPreview>,
-    raw_enabled: &mut bool,
-    processed_enabled: &mut bool,
-    birds_enabled: &mut bool,
-    env: &SdlEnv,
+    pending_raw: &mut Option<FramePacket>,
+    pending_processed: &mut Option<FramePacket>,
+    pending_bird: &mut Option<FramePacket>,
 ) {
     match msg {
-        PreviewMessage::Raw(frame) => {
-            if !*raw_enabled {
-                return;
-            }
-            ensure_preview(raw_preview, env, "Raw View", &frame);
-            if let Some(preview) = raw_preview.as_mut() {
-                if let Err(err) = preview.present(
-                    frame.width,
-                    frame.height,
-                    frame.format,
-                    &frame.data,
-                    frame.stride,
-                ) {
-                    eprintln!("[GUI] Failed to present raw frame: {}", err);
-                }
-            }
-        }
-        PreviewMessage::Processed(frame) => {
-            if !*processed_enabled {
-                return;
-            }
-            ensure_preview(processed_preview, env, "Processed View", &frame);
-            if let Some(preview) = processed_preview.as_mut() {
-                if let Err(err) = preview.present(
-                    frame.width,
-                    frame.height,
-                    frame.format,
-                    &frame.data,
-                    frame.stride,
-                ) {
-                    eprintln!("[GUI] Failed to present processed frame: {}", err);
-                }
-            }
-        }
-        PreviewMessage::Bird(frame) => {
-            if !*birds_enabled {
-                return;
-            }
-            ensure_preview(birds_eye_preview, env, "Bird's Eye View", &frame);
-            if let Some(preview) = birds_eye_preview.as_mut() {
-                if let Err(err) = preview.present(
-                    frame.width,
-                    frame.height,
-                    frame.format,
-                    &frame.data,
-                    frame.stride,
-                ) {
-                    eprintln!("[GUI] Failed to present bird's-eye frame: {}", err);
-                }
-            }
-        }
+        PreviewMessage::Raw(frame) => *pending_raw = Some(frame),
+        PreviewMessage::Processed(frame) => *pending_processed = Some(frame),
+        PreviewMessage::Bird(frame) => *pending_bird = Some(frame),
     }
 }
 
-fn ensure_preview(target: &mut Option<SdlPreview>, env: &SdlEnv, title: &str, frame: &FramePacket) {
+fn ensure_preview(
+    target: &mut Option<SdlPreview>,
+    env: &SdlEnv,
+    title: &str,
+    frame: &FramePacket,
+) -> opencv::Result<()> {
     if target.is_none() {
-        match SdlPreview::new(&env.video, title, frame.width, frame.height, frame.format) {
-            Ok(preview) => *target = Some(preview),
-            Err(err) => {
-                eprintln!("[GUI] Failed to create preview '{}': {}", title, err);
-                *target = None;
-            }
+        let preview = SdlPreview::new(&env.video, title, frame.width, frame.height, frame.format)?;
+        *target = Some(preview);
+    }
+    Ok(())
+}
+
+fn present_packet(preview: Option<&mut SdlPreview>, packet: &FramePacket) {
+    if let Some(preview) = preview {
+        if let Err(err) = preview.present(
+            packet.width,
+            packet.height,
+            packet.format,
+            &packet.data,
+            packet.stride,
+        ) {
+            eprintln!("[GUI] Failed to present frame: {}", err);
         }
     }
 }
