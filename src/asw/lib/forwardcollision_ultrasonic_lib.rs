@@ -1,1 +1,1 @@
-pub const THRESHOLD_DISTANCE:f32 = 30.0;
+pub const THRESHOLD_DISTANCE: f32 = 30.0;

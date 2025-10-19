@@ -1,11 +1,10 @@
 use opencv::{
+    Result,
     core::AlgorithmHint::ALGO_HINT_DEFAULT,
-    core::{self, Mat, Point, Point2f, Scalar, Size, Vector, CV_8UC1, CV_8UC3, DECOMP_LU},
-    highgui,
-    imgproc,
+    core::{self, CV_8UC1, CV_8UC3, DECOMP_LU, Mat, Point, Point2f, Scalar, Size, Vector},
+    highgui, imgproc,
     prelude::*,
     videoio,
-    Result,
 };
 use rayon::prelude::*;
 use std::f64::consts::PI;
@@ -158,16 +157,16 @@ impl Pipeline {
 
         // 투시 변환 행렬 (3x3)
         let transform_matrix = imgproc::get_perspective_transform(
-            &Mat::from_slice_2d(&[ &points_src ])?,
-            &Mat::from_slice_2d(&[ &points_dst ])?,
-            DECOMP_LU
+            &Mat::from_slice_2d(&[&points_src])?,
+            &Mat::from_slice_2d(&[&points_dst])?,
+            DECOMP_LU,
         )?;
 
         // 역투시 변환 행렬 (3x3)
         let inv_transform_matrix = imgproc::get_perspective_transform(
-            &Mat::from_slice_2d(&[ &points_dst ])?,
-            &Mat::from_slice_2d(&[ &points_src ])?,
-            DECOMP_LU
+            &Mat::from_slice_2d(&[&points_dst])?,
+            &Mat::from_slice_2d(&[&points_src])?,
+            DECOMP_LU,
         )?;
 
         // 좌우 차선 중앙 기준
@@ -242,7 +241,13 @@ impl Pipeline {
     ///   컴파일 시점에 안전성이 보장됩니다.
     pub(crate) fn gray_scale(&self, img: &Mat) -> Result<Mat> {
         let mut gray = Mat::default();
-        imgproc::cvt_color(img, &mut gray, imgproc::COLOR_BGR2GRAY, 0, ALGO_HINT_DEFAULT)?;
+        imgproc::cvt_color(
+            img,
+            &mut gray,
+            imgproc::COLOR_BGR2GRAY,
+            0,
+            ALGO_HINT_DEFAULT,
+        )?;
         Ok(gray)
     }
 
@@ -279,7 +284,7 @@ impl Pipeline {
             0.0,
             0.0,
             core::BORDER_DEFAULT,
-            ALGO_HINT_DEFAULT
+            ALGO_HINT_DEFAULT,
         )?;
         Ok(dst)
     }
@@ -437,7 +442,6 @@ impl Pipeline {
         minpix: i32,
         draw_windows: bool,
     ) -> Result<(Mat, Vec<f64>, Vec<f64>, bool, bool)> {
-
         // -------------------------------------------
         // 1) row별로 nonzero x좌표를 미리 분류
         // -------------------------------------------
@@ -446,11 +450,8 @@ impl Pipeline {
         // -------------------------------------------
         // 2) 시각화용 out_img, window_img 준비
         // -------------------------------------------
-        let mut out_img = Mat::new_size_with_default(
-            binary_img.size()?,
-            CV_8UC3,
-            Scalar::all(0.0)
-        )?;
+        let mut out_img =
+            Mat::new_size_with_default(binary_img.size()?, CV_8UC3, Scalar::all(0.0))?;
 
         // 이진 영상을 3채널로 변환해 out_img에 합치기
         {
@@ -463,11 +464,8 @@ impl Pipeline {
         }
 
         // 시각화용 window_img: (height x (width + 2*margin))
-        let mut window_img = Mat::zeros(
-            self.height,
-            self.width + 2 * self.window_margin,
-            CV_8UC3
-        )?.to_mat()?;
+        let mut window_img =
+            Mat::zeros(self.height, self.width + 2 * self.window_margin, CV_8UC3)?.to_mat()?;
 
         // out_img를 window_img 중앙 영역에 복사
         {
@@ -515,12 +513,12 @@ impl Pipeline {
                         win_xleft_low,
                         win_y_low,
                         (win_xleft_high - win_xleft_low).max(0),
-                        (win_y_high - win_y_low).max(0)
+                        (win_y_high - win_y_low).max(0),
                     ),
                     Scalar::new(0.0, 255.0, 0.0, 255.0),
                     2,
                     imgproc::LINE_8,
-                    0
+                    0,
                 )?;
                 // 오른쪽 윈도우 사각형
                 imgproc::rectangle(
@@ -529,12 +527,12 @@ impl Pipeline {
                         win_xright_low,
                         win_y_low,
                         (win_xright_high - win_xright_low).max(0),
-                        (win_y_high - win_y_low).max(0)
+                        (win_y_high - win_y_low).max(0),
                     ),
                     Scalar::new(0.0, 255.0, 0.0, 255.0),
                     2,
                     imgproc::LINE_8,
-                    0
+                    0,
                 )?;
 
                 // window_img에도 연분홍색으로 사각형
@@ -544,12 +542,12 @@ impl Pipeline {
                         win_xleft_low + self.window_margin,
                         win_y_low,
                         (win_xleft_high - win_xleft_low).max(0),
-                        (win_y_high - win_y_low).max(0)
+                        (win_y_high - win_y_low).max(0),
                     ),
                     Scalar::new(255.0, 100.0, 100.0, 255.0),
                     1,
                     imgproc::LINE_8,
-                    0
+                    0,
                 )?;
                 imgproc::rectangle(
                     &mut window_img,
@@ -557,12 +555,12 @@ impl Pipeline {
                         win_xright_low + self.window_margin,
                         win_y_low,
                         (win_xright_high - win_xright_low).max(0),
-                        (win_y_high - win_y_low).max(0)
+                        (win_y_high - win_y_low).max(0),
                     ),
                     Scalar::new(255.0, 100.0, 100.0, 255.0),
                     1,
                     imgproc::LINE_8,
-                    0
+                    0,
                 )?;
             }
 
@@ -578,18 +576,18 @@ impl Pipeline {
                 let row_nonzeros = &nonzero_points_by_row[y as usize];
 
                 // 왼쪽 윈도우 범위
-                let left_in_range = row_nonzeros.iter().filter(|&&x| {
-                    x >= win_xleft_low && x < win_xleft_high
-                });
+                let left_in_range = row_nonzeros
+                    .iter()
+                    .filter(|&&x| x >= win_xleft_low && x < win_xleft_high);
                 for &x in left_in_range {
                     left_lane_points.push((y, x));
                     good_left_count += 1;
                 }
 
                 // 오른쪽 윈도우 범위
-                let right_in_range = row_nonzeros.iter().filter(|&&x| {
-                    x >= win_xright_low && x < win_xright_high
-                });
+                let right_in_range = row_nonzeros
+                    .iter()
+                    .filter(|&&x| x >= win_xright_low && x < win_xright_high);
                 for &x in right_in_range {
                     right_lane_points.push((y, x));
                     good_right_count += 1;
@@ -717,13 +715,21 @@ impl Pipeline {
 
         for &(y, x) in &left_lane_points {
             let x_shifted = x + self.window_margin;
-            if y >= 0 && y < self.height && x_shifted >= 0 && x_shifted < (self.width + 2*self.window_margin) {
+            if y >= 0
+                && y < self.height
+                && x_shifted >= 0
+                && x_shifted < (self.width + 2 * self.window_margin)
+            {
                 *left_mask_w.at_2d_mut::<u8>(y, x_shifted)? = 255;
             }
         }
         for &(y, x) in &right_lane_points {
             let x_shifted = x + self.window_margin;
-            if y >= 0 && y < self.height && x_shifted >= 0 && x_shifted < (self.width + 2*self.window_margin) {
+            if y >= 0
+                && y < self.height
+                && x_shifted >= 0
+                && x_shifted < (self.width + 2 * self.window_margin)
+            {
                 *right_mask_w.at_2d_mut::<u8>(y, x_shifted)? = 255;
             }
         }
@@ -751,10 +757,10 @@ impl Pipeline {
         let mut left_fitx = Vec::with_capacity(self.ploty.len());
         let mut right_fitx = Vec::with_capacity(self.ploty.len());
         for &yv in &self.ploty {
-            let lx = left_fit_avg[0]*yv*yv + left_fit_avg[1]*yv + left_fit_avg[2];
+            let lx = left_fit_avg[0] * yv * yv + left_fit_avg[1] * yv + left_fit_avg[2];
             left_fitx.push(lx);
 
-            let rx = right_fit_avg[0]*yv*yv + right_fit_avg[1]*yv + right_fit_avg[2];
+            let rx = right_fit_avg[0] * yv * yv + right_fit_avg[1] * yv + right_fit_avg[2];
             right_fitx.push(rx);
         }
 
@@ -767,7 +773,13 @@ impl Pipeline {
         }
 
         // 반환
-        Ok((out_img, left_fitx, right_fitx, left_lane_detected, right_lane_detected))
+        Ok((
+            out_img,
+            left_fitx,
+            right_fitx,
+            left_lane_detected,
+            right_lane_detected,
+        ))
     }
     /// **이미 검출된 차선 주변에서만 픽셀을 탐색하여 연산 속도를 높입니다.**
     ///
@@ -817,8 +829,7 @@ impl Pipeline {
         // -------------------------------------------
         // 3) 이전 차선 주변의 픽셀들만 선택
         // -------------------------------------------
-        let approx_capacity =
-            (height.max(1) as usize).saturating_mul(margin.max(1) as usize);
+        let approx_capacity = (height.max(1) as usize).saturating_mul(margin.max(1) as usize);
         let mut left_lane_points: Vec<(i32, i32)> = Vec::with_capacity(approx_capacity);
         let mut right_lane_points: Vec<(i32, i32)> = Vec::with_capacity(approx_capacity);
 
@@ -924,7 +935,13 @@ impl Pipeline {
         // 7) 결과 시각화
         // -------------------------------------------
         let mut out_img = Mat::default();
-        imgproc::cvt_color(&binary_img, &mut out_img, imgproc::COLOR_GRAY2BGR, 0, ALGO_HINT_DEFAULT)?;
+        imgproc::cvt_color(
+            &binary_img,
+            &mut out_img,
+            imgproc::COLOR_GRAY2BGR,
+            0,
+            ALGO_HINT_DEFAULT,
+        )?;
 
         let mut window_img = Mat::zeros(height, width, CV_8UC3)?.to_mat()?;
 
@@ -1020,7 +1037,7 @@ impl Pipeline {
         left_fitx: &[f64],
         right_fitx: &[f64],
         left_lane_detected: bool,
-        right_lane_detected: bool
+        right_lane_detected: bool,
     ) -> f64 {
         // 양쪽 다 인식 실패 시 이전 각도 그대로
         if !left_lane_detected && !right_lane_detected {
@@ -1064,16 +1081,14 @@ impl Pipeline {
 
             // 두 직선의 기울기가 거의 같으면 (평행 판단)
             if (left_a - right_a).abs() < 1e-12 {
-                let inter_x = - (left_b + right_b) / (2.0 * left_a);
+                let inter_x = -(left_b + right_b) / (2.0 * left_a);
                 let inter_y = 0.0;
-                slope = (self.height as f64 - inter_y)
-                    / ((self.width as f64 / 2.0) - inter_x);
+                slope = (self.height as f64 - inter_y) / ((self.width as f64 / 2.0) - inter_x);
             } else {
                 // 교점 = (b2 - b1) / (a1 - a2)
                 let inter_x = (right_b - left_b) / (left_a - right_a);
                 let inter_y = left_a * inter_x + left_b;
-                slope = (self.height as f64 - inter_y)
-                    / ((self.width as f64 / 2.0) - inter_x);
+                slope = (self.height as f64 - inter_y) / ((self.width as f64 / 2.0) - inter_x);
             }
         }
 
@@ -1170,12 +1185,20 @@ impl Pipeline {
             Scalar::new(0.0, 255.0, 0.0, 255.0),
             5,
             imgproc::LINE_8,
-            0
+            0,
         )?;
 
         // 두 이미지를 가중 합성
         let mut heading_image = Mat::default();
-        core::add_weighted(&img_clone, 1.0, overlay_img, 1.0, 0.0, &mut heading_image, -1)?;
+        core::add_weighted(
+            &img_clone,
+            1.0,
+            overlay_img,
+            1.0,
+            0.0,
+            &mut heading_image,
+            -1,
+        )?;
         Ok(heading_image)
     }
 
@@ -1237,7 +1260,10 @@ impl Pipeline {
             let (img, lfx, rfx, l_det, r_det) = self.search_around_poly(&birds_eye, 100)?;
             println!(
                 "✅ 빠른 추적 실행: Left Pixels = {}, Right Pixels = {}, Left Detected = {}, Right Detected = {}",
-                lfx.len(), rfx.len(), l_det, r_det
+                lfx.len(),
+                rfx.len(),
+                l_det,
+                r_det
             ); // <--- 로그 추가
 
             // 결과 할당
@@ -1264,7 +1290,10 @@ impl Pipeline {
                 self.sliding_window(&birds_eye, 15, 100, 50, true)?;
             println!(
                 "🔍 전체 탐색 실행: Left Pixels = {}, Right Pixels = {}, Left Detected = {}, Right Detected = {}",
-                lfx.len(), rfx.len(), l_det, r_det
+                lfx.len(),
+                rfx.len(),
+                l_det,
+                r_det
             ); // <--- 로그 추가
 
             // 결과 할당
@@ -1284,12 +1313,11 @@ impl Pipeline {
         );
 
         if self.visible == true {
-
             // 9) 조향각 시각화 (슬라이딩 윈도우 영상에 선 그리기)
             let sliding_with_line = self.display_heading_line(
                 &sliding_window_img,
                 &sliding_window_img,
-                self.steering_angle
+                self.steering_angle,
             )?;
 
             // 10) 원근 시야로 역투시 변환
@@ -1310,7 +1338,7 @@ impl Pipeline {
                 Scalar::new(255.0, 255.0, 255.0, 255.0),
                 2,
                 imgproc::LINE_8,
-                false
+                false,
             )?;
 
             // FPS 측정
@@ -1329,7 +1357,7 @@ impl Pipeline {
                 Scalar::new(255.0, 255.0, 255.0, 255.0),
                 2,
                 imgproc::LINE_8,
-                false
+                false,
             )?;
 
             let mut sliding_texted = sliding_with_line.clone();
@@ -1342,18 +1370,16 @@ impl Pipeline {
                 Scalar::new(255.0, 255.0, 255.0, 255.0),
                 2,
                 imgproc::LINE_8,
-                false
+                false,
             )?;
 
             // 최종 합성 결과 (좌: 슬라이딩윈도우, 우: 최종)
             let mut merged = Mat::default();
             hconcat_2(&sliding_texted, &total_processed, &mut merged)?;
             Ok(merged)
-        }
-        else {
+        } else {
             Ok(Mat::default())
         }
-
     }
 
     /// 차선 검출을 시작하는 함수입니다.
@@ -1404,7 +1430,7 @@ impl Pipeline {
                 core::Size::new(1280, 720),
                 0.0,
                 0.0,
-                imgproc::INTER_LINEAR
+                imgproc::INTER_LINEAR,
             )?;
 
             let start_time = Instant::now();
@@ -1417,7 +1443,8 @@ impl Pipeline {
 
                 // (4) 'q' 키 입력 시 종료
                 let key = highgui::wait_key(1)?;
-                if key == 113 { // 'q' 키(ASCII)
+                if key == 113 {
+                    // 'q' 키(ASCII)
                     self.exit_flag = true;
                 }
 
@@ -1458,11 +1485,7 @@ fn polyfit_1d(xs: &[f64], ys: &[f64]) -> Option<[f64; 2]> {
     let sum_x = xs.iter().sum::<f64>();
     let sum_y = ys.iter().sum::<f64>();
     let sum_x2 = xs.iter().map(|&x| x * x).sum::<f64>();
-    let sum_xy = xs
-        .iter()
-        .zip(ys.iter())
-        .map(|(&x, &y)| x * y)
-        .sum::<f64>();
+    let sum_xy = xs.iter().zip(ys.iter()).map(|(&x, &y)| x * y).sum::<f64>();
 
     let denom = n * sum_x2 - sum_x * sum_x;
     if denom.abs() < 1e-12 {
@@ -1534,21 +1557,17 @@ fn polyfit_2d(xs: &[f64], ys: &[f64]) -> Option<[f64; 3]> {
     let b3 = y_sum;
 
     // 3x3 행렬식
-    let det = a11*(a22*a33 - a23*a32)
-        - a12*(a21*a33 - a23*a31)
-        + a13*(a21*a32 - a22*a31);
+    let det = a11 * (a22 * a33 - a23 * a32) - a12 * (a21 * a33 - a23 * a31)
+        + a13 * (a21 * a32 - a22 * a31);
 
     if det.abs() < 1e-12 {
         return None;
     }
 
     // Cramer's rule
-    let det_a = |a11_, a12_, a13_,
-                 a21_, a22_, a23_,
-                 a31_, a32_, a33_| {
-        a11_*(a22_*a33_ - a23_*a32_)
-            - a12_*(a21_*a33_ - a23_*a31_)
-            + a13_*(a21_*a32_ - a22_*a31_)
+    let det_a = |a11_, a12_, a13_, a21_, a22_, a23_, a31_, a32_, a33_| {
+        a11_ * (a22_ * a33_ - a23_ * a32_) - a12_ * (a21_ * a33_ - a23_ * a31_)
+            + a13_ * (a21_ * a32_ - a22_ * a31_)
     };
 
     let det0 = det_a(b1, a12, a13, b2, a22, a23, b3, a32, a33);
@@ -1634,7 +1653,6 @@ fn get_nonzero_points_by_row(binary_img: &Mat) -> Result<Vec<Vec<i32>>> {
 
     Ok(result)
 }
-
 
 #[derive(Clone, Copy, Debug)]
 pub struct LaneTaskConfig {

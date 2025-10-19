@@ -18,7 +18,10 @@ pub async fn ea_ultrasonic_provider(channels: UltrasonicChannels) {
             s // 성공하면 센서 객체를 반환
         }
         Err(e) => {
-            eprintln!("[BSW] 초음파 센서 초기화 실패: {:?}. Provider를 종료합니다.", e);
+            eprintln!(
+                "[BSW] 초음파 센서 초기화 실패: {:?}. Provider를 종료합니다.",
+                e
+            );
             return; // 함수 종료
         }
     };

@@ -2,13 +2,13 @@
 
 mod asw;
 mod bsw;
+mod gui;
 mod rte;
 
 use crate::rte::rte_dto::*;
 use crate::rte::rte_main::RteSystem;
-use opencv::highgui;
+use gui::sdl_preview::SdlPreview;
 use std::sync::Arc;
-use tokio::task;
 use tokio::{select, sync::broadcast::error::RecvError};
 
 #[tokio::main(flavor = "multi_thread")]
@@ -57,13 +57,11 @@ async fn main() -> opencv::Result<()> {
     let mut lane_angle_rx = camera_channels.lane_angle_tx.subscribe();
     let mut distance_rx = ultrasonic_channels.raw_tx.subscribe();
 
-    // GUI를 위한 윈도우 생성
-    highgui::named_window("CAM View", highgui::WINDOW_AUTOSIZE)?;
-
     // 각 창에 표시할 최신 프레임을 저장할 변수 (루프 외부에 선언)
     let mut latest_raw_frame: Option<Arc<DtoCamRaw>> = None;
     let mut _latest_processed_frame: Option<Arc<DtoCamProcessed>> = None;
     let mut _latest_birds_eye_frame: Option<Arc<DtoCamBirdEyeView>> = None;
+    let mut sdl_preview: Option<SdlPreview> = None;
 
     // Main 스레드에서 GUI 이벤트 루프 실행
     'main_loop: loop {
@@ -139,24 +137,21 @@ async fn main() -> opencv::Result<()> {
             while let Ok(newer) = camraw_rx.try_recv() {
                 latest_raw_frame = Some(newer);
             }
-            // 2) 블로킹 렌더링을 block_in_place로 감쌈
-            let should_quit = task::block_in_place(|| -> opencv::Result<bool> {
-                if let Some(frame) = &latest_raw_frame {
-                    let display_mat = frame.as_bgr_mat()?;
-                    highgui::imshow("Raw View", &display_mat)?;
-                }
-                // if let Some(frame) = &latest_processed_frame {
-                //     highgui::imshow("CAM View", &*frame.img)?;
-                // }
-                // if let Some(frame) = &latest_birds_eye_frame {
-                //     highgui::imshow("Bird's Eye View", &*frame.img)?;
-                // }
-                let key = highgui::wait_key(1)?;
-                Ok(key == 113) // 'q'
-            })?;
 
-            if should_quit {
-                break;
+            if let Some(frame) = &latest_raw_frame {
+                if sdl_preview.is_none() {
+                    sdl_preview = Some(SdlPreview::new(
+                        frame.width,
+                        frame.height,
+                        frame.color_format,
+                    )?);
+                }
+
+                if let Some(preview) = sdl_preview.as_mut() {
+                    if preview.present(frame)? {
+                        break;
+                    }
+                }
             }
         }
     }

@@ -1,10 +1,11 @@
 // 필요한 모듈들을 use 키워드로 가져옵니다.
+use dbscan::*;
 use opencv::{
+    Result,
     core::{self, AlgorithmHint::ALGO_HINT_DEFAULT, Mat, Point, Scalar, Size}, // Size 추가
-    imgproc, Result,
+    imgproc,
     prelude::*,
 };
-use dbscan::*;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,16 +64,28 @@ impl Pipeline {
 
     pub fn convert_to_hsv(&self, bgr_frame: &Mat) -> Result<Mat> {
         let mut hsv_frame = Mat::default();
-        imgproc::cvt_color(bgr_frame, &mut hsv_frame, imgproc::COLOR_BGR2HSV, 0, ALGO_HINT_DEFAULT)?;
+        imgproc::cvt_color(
+            bgr_frame,
+            &mut hsv_frame,
+            imgproc::COLOR_BGR2HSV,
+            0,
+            ALGO_HINT_DEFAULT,
+        )?;
         Ok(hsv_frame)
     }
 
     /// HSV 프레임에서 신호등 색상을 감지하고 내부 상태를 업데이트합니다.
     pub fn detect_color_from_hsv(&mut self, hsv_frame: &Mat) -> TrafficLightColor {
         // 각 색상에 대한 마스크를 생성합니다.
-        let red_mask = self.create_mask(hsv_frame, self.red_threshold).unwrap_or_default();
-        let yellow_mask = self.create_mask(hsv_frame, self.yellow_threshold).unwrap_or_default();
-        let green_mask = self.create_mask(hsv_frame, self.green_threshold).unwrap_or_default();
+        let red_mask = self
+            .create_mask(hsv_frame, self.red_threshold)
+            .unwrap_or_default();
+        let yellow_mask = self
+            .create_mask(hsv_frame, self.yellow_threshold)
+            .unwrap_or_default();
+        let green_mask = self
+            .create_mask(hsv_frame, self.green_threshold)
+            .unwrap_or_default();
 
         // --- ⬇️ 모폴로지 연산으로 노이즈 제거 ⬇️ ---
         let red_mask_denoised = self.apply_morphology(&red_mask).unwrap_or(red_mask);
@@ -83,11 +96,20 @@ impl Pipeline {
         let yellow_pixels = self.find_largest_cluster(&yellow_mask_denoised);
         let green_pixels = self.find_largest_cluster(&green_mask_denoised);
 
-        let detected_color = if red_pixels > MIN_PIXEL_THRESHOLD && red_pixels >= yellow_pixels && red_pixels >= green_pixels {
+        let detected_color = if red_pixels > MIN_PIXEL_THRESHOLD
+            && red_pixels >= yellow_pixels
+            && red_pixels >= green_pixels
+        {
             TrafficLightColor::Red
-        } else if yellow_pixels > MIN_PIXEL_THRESHOLD && yellow_pixels >= red_pixels && yellow_pixels >= green_pixels {
+        } else if yellow_pixels > MIN_PIXEL_THRESHOLD
+            && yellow_pixels >= red_pixels
+            && yellow_pixels >= green_pixels
+        {
             TrafficLightColor::Yellow
-        } else if green_pixels > MIN_PIXEL_THRESHOLD && green_pixels >= red_pixels && green_pixels >= yellow_pixels {
+        } else if green_pixels > MIN_PIXEL_THRESHOLD
+            && green_pixels >= red_pixels
+            && green_pixels >= yellow_pixels
+        {
             TrafficLightColor::Green
         } else {
             TrafficLightColor::Off

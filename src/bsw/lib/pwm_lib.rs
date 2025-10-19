@@ -22,8 +22,6 @@ pub const SERVO_MAX: u16 = 410; // 180도일 때 약 2ms 펄스
 pub const DC_MIN: u16 = 0;
 pub const DC_MAX: u16 = 4096;
 
-
-
 // 제어할 모터를 나타내는 열거형
 pub enum Motor {
     M1,
@@ -42,10 +40,10 @@ pub fn angle_to_pwm(angle: u32) -> u16 {
     // 안전을 위해 각도를 0-180도 범위로 제한
     let clamped_angle = angle.clamp(0, 180);
     // SERVO_MIN과 SERVO_MAX 사이를 선형 보간하여 PWM 값을 계산
-    let pwm_value = SERVO_MIN as f64 + (clamped_angle as f64 / 180.0) * (SERVO_MAX - SERVO_MIN) as f64;
+    let pwm_value =
+        SERVO_MIN as f64 + (clamped_angle as f64 / 180.0) * (SERVO_MAX - SERVO_MIN) as f64;
     pwm_value.round() as u16
 }
-
 
 /// DC 모터를 제어하는 함수
 ///
@@ -55,12 +53,7 @@ pub fn angle_to_pwm(angle: u32) -> u16 {
 /// * `motor` - 제어할 모터 (Motor 열거형)
 /// * `direction` - 회전 방향 (Direction 열거형)
 /// * `speed` - 모터 속도 (0 ~ 4095 사이의 값)
-pub fn motor_control(
-    pwm: &mut Pca9685<I2cdev>,
-    motor: Motor,
-    direction: Direction,
-    speed: u16,
-) {
+pub fn motor_control(pwm: &mut Pca9685<I2cdev>, motor: Motor, direction: Direction, speed: u16) {
     let (in1, in2) = match motor {
         Motor::M1 => (MOTOR_M1_IN1, MOTOR_M1_IN2),
         Motor::M2 => (MOTOR_M2_IN1, MOTOR_M2_IN2),
@@ -81,10 +74,7 @@ pub fn motor_control(
 }
 
 /// 특정 모터를 정지시키는 함수
-pub fn motor_stop(
-    pwm: &mut Pca9685<I2cdev>,
-    motor: Motor,
-) {
+pub fn motor_stop(pwm: &mut Pca9685<I2cdev>, motor: Motor) {
     let (in1, in2) = match motor {
         Motor::M1 => (MOTOR_M1_IN1, MOTOR_M1_IN2),
         Motor::M2 => (MOTOR_M2_IN1, MOTOR_M2_IN2),
@@ -98,11 +88,8 @@ pub fn percent_to_pwm(percent: u32) -> u16 {
     // 안전을 위해 입력 퍼센트를 0-100으로 제한
     let clamped_percent = percent.clamp(0, 100);
     // DC_MIN과 DC_MAX 사이를 선형 보간하여 PWM 값을 계산
-    let pwm_value = DC_MIN as f64
-        + (clamped_percent as f64 / 100.0) * (DC_MAX - DC_MIN) as f64;
+    let pwm_value = DC_MIN as f64 + (clamped_percent as f64 / 100.0) * (DC_MAX - DC_MIN) as f64;
     // 계산된 값이 DC 범위를 벗어나지 않도록 한 번 더 클램프
     let pwm_value = pwm_value.round();
-    pwm_value
-        .clamp(DC_MIN as f64, DC_MAX as f64)
-        as u16
+    pwm_value.clamp(DC_MIN as f64, DC_MAX as f64) as u16
 }

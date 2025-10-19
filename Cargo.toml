@@ -13,6 +13,7 @@ pwm-pca9685 = "1.0.0"
 dbscan = "0.3.1"
 pyo3 = {version = "0.26.0", features = ["auto-initialize"]}
 numpy = "0.26.0"
+sdl2 = "0.36.0"
 
 [build-dependencies]
 cc = { version = "1.0", features = ["parallel"] }

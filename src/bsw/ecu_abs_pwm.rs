@@ -13,7 +13,10 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
     let i2c_dev = match I2cdev::new(I2C_BUS) {
         Ok(dev) => dev,
         Err(e) => {
-            eprintln!("[BSW] I2C 버스 '{}' 열기 실패: {:?}. 액추에이터를 실행하지 않습니다.", I2C_BUS, e);
+            eprintln!(
+                "[BSW] I2C 버스 '{}' 열기 실패: {:?}. 액추에이터를 실행하지 않습니다.",
+                I2C_BUS, e
+            );
             return;
         }
     };
@@ -23,9 +26,12 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
         Ok(p) => {
             println!("[BSW] PCA9685 드라이버 초기화 성공.");
             p
-        },
+        }
         Err(e) => {
-            eprintln!("[BSW] PCA9685 드라이버 초기화 실패: {:?}. 액추에이터를 실행하지 않습니다.", e);
+            eprintln!(
+                "[BSW] PCA9685 드라이버 초기화 실패: {:?}. 액추에이터를 실행하지 않습니다.",
+                e
+            );
             return;
         }
     };
@@ -49,7 +55,7 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
     }
 
     // 서보 초기화
-    let _ = pwm.set_channel_off(Channel::C0, angle_to_pwm(90));  // 바퀴 조향 
+    let _ = pwm.set_channel_off(Channel::C0, angle_to_pwm(90)); // 바퀴 조향 
     let _ = pwm.set_channel_off(Channel::C1, angle_to_pwm(180)); // 카메라 좌우
     let _ = pwm.set_channel_off(Channel::C2, angle_to_pwm(170)); // 카메라 위아래
 
