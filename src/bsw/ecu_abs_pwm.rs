@@ -162,6 +162,9 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
     }
 
     // 종료 시 PWM 컨트롤러를 정상적으로 비활성화
-    // let _ = pwm.destroy();
-    // println!("[BSW] PCA9685 서보 액추에이터가 종료되었습니다.");
+    if let Err(e) = pwm.disable() {
+        eprintln!("[BSW] PCA9685 disable 실패: {:?}", e);
+    }
+    let _ = pwm.destroy();
+    println!("[BSW] PCA9685 서보 액추에이터가 종료되었습니다.");
 }

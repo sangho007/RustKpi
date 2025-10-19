@@ -163,6 +163,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
 
         if let Some(event_rx) = preview_event_rx.as_mut() {
             if let Ok(PreviewEvent::Quit) = event_rx.try_recv() {
+                println!("[MAIN] Preview requested quit, shutting down...");
                 break 'main_loop;
             }
         }
@@ -172,7 +173,9 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
         drop(tx);
     }
     if let Some(handle) = preview_handle {
-        let _ = handle.join();
+        if let Err(err) = handle.join() {
+            eprintln!("[MAIN] Failed to join preview thread: {:?}", err);
+        }
     }
 
     println!("== 시뮬레이션 종료 ==");
