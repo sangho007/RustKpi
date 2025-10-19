@@ -1,24 +1,22 @@
 // main.rs
 
-mod rte;
-mod bsw;
 mod asw;
+mod bsw;
+mod rte;
 
 use crate::rte::rte_dto::*;
 use crate::rte::rte_main::RteSystem;
-use opencv::core::{AlgorithmHint, Mat};
 use opencv::highgui;
-use opencv::imgproc;
+use std::sync::Arc;
 use tokio::task;
 use tokio::{select, sync::broadcast::error::RecvError};
-use std::sync::Arc;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> opencv::Result<()> {
     let RteSystem { channels } = rte::rte_main::init();
     let camera_channels = channels.camera.clone();
     let ultrasonic_channels = channels.ultrasonic.clone();
-    let control_channels = channels.control.clone();
+    let _control_channels = channels.control.clone();
 
     // BSW Task 생성
     tokio::spawn(bsw::ecu_abs_cam::ea_cam_provider(camera_channels.clone()));
@@ -29,7 +27,6 @@ async fn main() -> opencv::Result<()> {
     //     "MotorControl",
     //     control_channels.clone(),
     // ));
-
 
     // ASW Task 생성
     // tokio::spawn(asw::vs_lane::runnable_pre_processing(
@@ -49,12 +46,10 @@ async fn main() -> opencv::Result<()> {
     //     camera_channels.clone(),
     // ));
 
-
-
     // 디버깅용 코드
     println!("== 시스템 실행 중... (GUI 창에서 'q'를 누르면 종료) ==");
 
-    const DEBUG_ON:bool = true;
+    const DEBUG_ON: bool = true;
 
     let mut camraw_rx = camera_channels.raw_tx.subscribe();
     let mut processed_rx = camera_channels.processed_tx.subscribe();
@@ -67,8 +62,8 @@ async fn main() -> opencv::Result<()> {
 
     // 각 창에 표시할 최신 프레임을 저장할 변수 (루프 외부에 선언)
     let mut latest_raw_frame: Option<Arc<DtoCamRaw>> = None;
-    let mut latest_processed_frame: Option<Arc<DtoCamProcessed>> = None;
-    let mut latest_birds_eye_frame: Option<Arc<DtoCamBirdEyeView>> = None;
+    let mut _latest_processed_frame: Option<Arc<DtoCamProcessed>> = None;
+    let mut _latest_birds_eye_frame: Option<Arc<DtoCamBirdEyeView>> = None;
 
     // Main 스레드에서 GUI 이벤트 루프 실행
     'main_loop: loop {
@@ -87,7 +82,7 @@ async fn main() -> opencv::Result<()> {
             },
             result = processed_rx.recv() => match result {
                 Ok(cam_processed) => {
-                    latest_processed_frame = Some(cam_processed);
+                    _latest_processed_frame = Some(cam_processed);
                 }
                 Err(RecvError::Lagged(n)) => {
                     eprintln!("[MAIN] Processed frame lagged by {}", n);
@@ -99,7 +94,7 @@ async fn main() -> opencv::Result<()> {
             },
             result = birds_eye_rx.recv() => match result {
                 Ok(birds_eye) => {
-                    latest_birds_eye_frame = Some(birds_eye);
+                    _latest_birds_eye_frame = Some(birds_eye);
                 }
                 Err(RecvError::Lagged(n)) => {
                     eprintln!("[MAIN] Bird eye stream lagged by {}", n);
@@ -134,38 +129,13 @@ async fn main() -> opencv::Result<()> {
                 }
             }
         }
-        
+
         if DEBUG_ON {
             // 2) 블로킹 렌더링을 block_in_place로 감쌈
             let should_quit = task::block_in_place(|| -> opencv::Result<bool> {
                 if let Some(frame) = &latest_raw_frame {
-                    match frame.color_format {
-                        ColorFormat::Bgr | ColorFormat::Gray => {
-                            highgui::imshow("Raw View", &*frame.img)?;
-                        }
-                        ColorFormat::Rgb => {
-                            let mut converted = Mat::default();
-                            imgproc::cvt_color(
-                                &*frame.img,
-                                &mut converted,
-                                imgproc::COLOR_RGB2BGR,
-                                0,
-                                AlgorithmHint::ALGO_HINT_DEFAULT,
-                            )?;
-                            highgui::imshow("Raw View", &converted)?;
-                        }
-                        ColorFormat::Rgba => {
-                            let mut converted = Mat::default();
-                            imgproc::cvt_color(
-                                &*frame.img,
-                                &mut converted,
-                                imgproc::COLOR_RGBA2BGR,
-                                0,
-                                AlgorithmHint::ALGO_HINT_DEFAULT,
-                            )?;
-                            highgui::imshow("Raw View", &converted)?;
-                        }
-                    }
+                    let display_mat = frame.as_bgr_mat()?;
+                    highgui::imshow("Raw View", &display_mat)?;
                 }
                 // if let Some(frame) = &latest_processed_frame {
                 //     highgui::imshow("CAM View", &*frame.img)?;
@@ -182,9 +152,11 @@ async fn main() -> opencv::Result<()> {
             }
         }
     }
-    
+
     println!("== 시스템 실행 중... (Ctrl+C로 종료) ==");
-    tokio::signal::ctrl_c().await.expect("Ctrl-C 핸들러 설정 실패");
+    tokio::signal::ctrl_c()
+        .await
+        .expect("Ctrl-C 핸들러 설정 실패");
     println!("\n== 시뮬레이션 종료 ==");
     Ok(())
 }

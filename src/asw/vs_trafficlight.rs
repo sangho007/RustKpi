@@ -41,10 +41,11 @@ pub async fn runnable_trafficlight_detection(
                 cam_raw = newer;
             }
 
-            let should_detect =
-                (alive_cnt % TRAFFIC_DETECTION_INTERVAL == 0) || matches!(last_detected_color, TrafficLightColor::Off);
+            let should_detect = (alive_cnt % TRAFFIC_DETECTION_INTERVAL == 0)
+                || matches!(last_detected_color, TrafficLightColor::Off);
             if should_detect {
-                let hsv = pipeline.convert_to_hsv(&cam_raw.img)?;
+                let bgr_mat = cam_raw.as_bgr_mat()?;
+                let hsv = pipeline.convert_to_hsv(&bgr_mat)?;
                 let detected_color = pipeline.detect_color_from_hsv(&hsv);
                 last_detected_color = detected_color;
             }

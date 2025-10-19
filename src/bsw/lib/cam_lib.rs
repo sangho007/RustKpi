@@ -1,14 +1,14 @@
 pub mod picamera_capture {
-    use opencv::core::{Mat, Mat_AUTO_STEP, CV_8UC3};
+    use numpy::PyArrayMethods;
+    use opencv::core::{CV_8UC3, Mat, Mat_AUTO_STEP};
     use pyo3::exceptions::PyRuntimeError;
     use pyo3::prelude::*;
     use pyo3::types::PyDict;
-    use numpy::PyArrayMethods;
     use std::ffi::c_void;
 
     pub const CAM_MODE: i32 = 1;
 
-        // Python picamera2 객체를 감싸는 Rust 구조체
+    // Python picamera2 객체를 감싸는 Rust 구조체
     pub struct PiCamera2 {
         py_instance: Py<PyAny>,
         width: u32,
@@ -29,7 +29,8 @@ pub mod picamera_capture {
                 main_config.set_item("format", "BGR888")?;
                 config_args.set_item("main", main_config)?;
 
-                let config = picam2.call_method("create_preview_configuration", (), Some(&config_args))?;
+                let config =
+                    picam2.call_method("create_preview_configuration", (), Some(&config_args))?;
                 picam2.call_method1("configure", (config,))?;
                 picam2.call_method0("start")?;
 
@@ -47,7 +48,7 @@ pub mod picamera_capture {
             })
         }
 
-            /// 카메라에서 한 프레임을 캡처하여 opencv::Mat으로 변환합니다.
+        /// 카메라에서 한 프레임을 캡처하여 opencv::Mat으로 변환합니다.
         pub fn capture_frame(&self) -> PyResult<Mat> {
             Python::with_gil(|py| {
                 // `capture_array()`를 호출하여 NumPy 배열 객체를 가져옵니다.
@@ -56,7 +57,7 @@ pub mod picamera_capture {
                 // PyAny 객체를 PyArray3<u8> 타입으로 안전하게 다운캐스트합니다.
                 let np_array = np_array_obj.downcast_bound::<numpy::PyArray3<u8>>(py)?;
                 let readonly_array = np_array.readonly(); // Now it has a name and a longer life
-                let data = readonly_array.as_slice()?;    // Borrowing from it is now safe
+                let data = readonly_array.as_slice()?; // Borrowing from it is now safe
 
                 // `unsafe` 블록 안에서 데이터에 대한 뷰(view)로 Mat을 생성합니다.
                 // 이 Mat은 데이터를 소유하지 않습니다.
@@ -69,7 +70,9 @@ pub mod picamera_capture {
                         Mat_AUTO_STEP,
                     )
                 }
-                .map_err(|e| PyRuntimeError::new_err(format!("Failed to create Mat from NumPy array: {}", e)))?; // <-- '?'를 사용해 Result를 처리하고 Mat을 가져옵니다.
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to create Mat from NumPy array: {}", e))
+                })?; // <-- '?'를 사용해 Result를 처리하고 Mat을 가져옵니다.
 
                 // mat_view.clone()은 데이터를 깊은 복사(deep copy)하여
                 // 데이터 소유권을 가진 새로운 Mat을 생성합니다.
@@ -77,9 +80,12 @@ pub mod picamera_capture {
             })
         }
 
+        pub fn dimensions(&self) -> (u32, u32) {
+            (self.width, self.height)
+        }
     }
 
-        // PiCamera2가 Drop될 때 Python 객체를 안전하게 정지시킵니다.
+    // PiCamera2가 Drop될 때 Python 객체를 안전하게 정지시킵니다.
     impl Drop for PiCamera2 {
         fn drop(&mut self) {
             let _ = Python::with_gil(|py| self.py_instance.call_method0(py, "stop"));
@@ -87,38 +93,93 @@ pub mod picamera_capture {
         }
     }
 }
-use crate::rte::rte_dto::ColorFormat;
+use crate::rte::rte_dto::{CameraBuffer, ColorFormat};
 use opencv::core::Mat;
-use opencv::prelude::{MatTraitConst, VideoCaptureTrait, VideoCaptureTraitConst};
-use opencv::{videoio, Result};
+use opencv::prelude::{MatTraitConst, MatTraitConstManual, VideoCaptureTrait};
+use opencv::{Result, videoio};
+use std::sync::Arc;
+
+pub struct CapturedFrame {
+    pub buffer: Arc<CameraBuffer>,
+    pub width: u32,
+    pub height: u32,
+    pub stride: usize,
+    pub bytes_per_pixel: usize,
+    pub color_format: ColorFormat,
+}
+
+impl CapturedFrame {
+    pub fn new(
+        buffer: Arc<CameraBuffer>,
+        width: u32,
+        height: u32,
+        stride: usize,
+        bytes_per_pixel: usize,
+        color_format: ColorFormat,
+    ) -> Self {
+        Self {
+            buffer,
+            width,
+            height,
+            stride,
+            bytes_per_pixel,
+            color_format,
+        }
+    }
+}
 
 /// 프레임을 읽어오는 동작을 추상화하는 Trait
 pub trait FrameCapture: Send {
-    fn read_frame(&mut self, frame: &mut Mat) -> Result<bool>;
-    fn color_format(&self) -> ColorFormat;
+    fn read_frame(&mut self) -> Result<Option<CapturedFrame>>;
 }
 
 // 기존 `videoio::VideoCapture`에 대해 Trait 구현
 impl FrameCapture for videoio::VideoCapture {
-    fn read_frame(&mut self, frame: &mut Mat) -> Result<bool> {
-        VideoCaptureTrait::read(self, frame)
-    }
+    fn read_frame(&mut self) -> Result<Option<CapturedFrame>> {
+        let mut frame = Mat::default();
+        if !VideoCaptureTrait::read(self, &mut frame)? || frame.empty() {
+            return Ok(None);
+        }
 
-    fn color_format(&self) -> ColorFormat {
-        ColorFormat::Bgr
+        let width = frame.cols() as u32;
+        let height = frame.rows() as u32;
+        let bytes_per_pixel = frame.elem_size()? as usize;
+        let stride = width as usize * bytes_per_pixel;
+        let data = frame.data_bytes()?;
+        let buffer = CameraBuffer::from_vec(data.to_vec());
+
+        Ok(Some(CapturedFrame::new(
+            Arc::new(buffer),
+            width,
+            height,
+            stride,
+            bytes_per_pixel,
+            ColorFormat::Bgr,
+        )))
     }
 }
 
 // 새로 만든 `PiCamera2`에 대해 Trait 구현
 impl FrameCapture for picamera_capture::PiCamera2 {
-    fn read_frame(&mut self, frame: &mut Mat) -> Result<bool> {
+    fn read_frame(&mut self) -> Result<Option<CapturedFrame>> {
         match self.capture_frame() {
             Ok(captured_frame) => {
                 if captured_frame.empty() {
-                    Ok(false)
+                    Ok(None)
                 } else {
-                    *frame = captured_frame;
-                    Ok(true)
+                    let (width, height) = self.dimensions();
+                    let data = captured_frame.data_bytes()?;
+                    let buffer = CameraBuffer::from_vec(data.to_vec());
+                    let stride = width as usize * 3;
+
+                    Ok(Some(CapturedFrame::new(
+                        Arc::new(buffer),
+                        width,
+                        height,
+                        stride,
+                        3,
+                        ColorFormat::Bgr,
+                    )))
                 }
             }
             Err(e) => {
@@ -131,29 +192,21 @@ impl FrameCapture for picamera_capture::PiCamera2 {
             }
         }
     }
-
-    fn color_format(&self) -> ColorFormat {
-        ColorFormat::Bgr
-    }
 }
 
 impl FrameCapture for libcamera_capture::LibcameraCapture {
-    fn read_frame(&mut self, frame: &mut Mat) -> Result<bool> {
-        self.capture_into(frame)
-    }
-
-    fn color_format(&self) -> ColorFormat {
-        self.color_format()
+    fn read_frame(&mut self) -> Result<Option<CapturedFrame>> {
+        self.capture_frame()
     }
 }
 pub mod libcamera_capture {
-    use crate::rte::rte_dto::ColorFormat;
-    use opencv::core::{Mat, CV_8UC3, CV_8UC4};
-    use opencv::prelude::{MatTrait, MatTraitConst};
+    use super::CapturedFrame;
+    use crate::rte::rte_dto::{BufferRecycler, CameraBuffer, ColorFormat};
     use opencv::{Error, Result};
     use std::cmp;
-    use std::ffi::{c_char, c_void, CStr};
+    use std::ffi::{CStr, c_char};
     use std::ptr::NonNull;
+    use std::sync::{Arc, Mutex};
 
     #[repr(C)]
     struct LibcameraBridgeOpaque {
@@ -190,13 +243,57 @@ pub mod libcamera_capture {
         Error::new(opencv::core::StsError, msg.into())
     }
 
+    struct BufferPool {
+        buffer_len: usize,
+        buffers: Mutex<Vec<Vec<u8>>>,
+    }
+
+    impl BufferPool {
+        fn new(buffer_len: usize, preallocate: usize) -> Arc<Self> {
+            let mut buffers = Vec::with_capacity(preallocate);
+            for _ in 0..preallocate {
+                let mut vec = Vec::with_capacity(buffer_len);
+                unsafe {
+                    vec.set_len(buffer_len);
+                }
+                buffers.push(vec);
+            }
+
+            Arc::new(Self {
+                buffer_len,
+                buffers: Mutex::new(buffers),
+            })
+        }
+
+        fn acquire(&self) -> Vec<u8> {
+            let mut guard = self.buffers.lock().unwrap();
+            guard.pop().unwrap_or_else(|| {
+                let mut vec = Vec::with_capacity(self.buffer_len);
+                unsafe {
+                    vec.set_len(self.buffer_len);
+                }
+                vec
+            })
+        }
+    }
+
+    impl BufferRecycler for BufferPool {
+        fn recycle(&self, mut buffer: Vec<u8>) {
+            if buffer.len() != self.buffer_len {
+                buffer.resize(self.buffer_len, 0);
+            }
+            let mut guard = self.buffers.lock().unwrap();
+            guard.push(buffer);
+        }
+    }
+
     pub struct LibcameraCapture {
         handle: NonNull<LibcameraBridgeOpaque>,
         width: u32,
         height: u32,
         stride: usize,
         bytes_per_pixel: usize,
-        buffer: Vec<u8>,
+        pool: Arc<BufferPool>,
         color_format: ColorFormat,
         frame_counter: u64,
     }
@@ -247,7 +344,7 @@ pub mod libcamera_capture {
             let buffer_len = stride_usize
                 .checked_mul(height as usize)
                 .ok_or_else(|| opencv_err("libcamera buffer size overflow"))?;
-            let buffer = vec![0u8; buffer_len];
+            let pool = BufferPool::new(buffer_len, 4);
             let color_format = match bytes_per_pixel {
                 3 => ColorFormat::Rgb,
                 4 => ColorFormat::Rgba,
@@ -255,7 +352,7 @@ pub mod libcamera_capture {
                     return Err(opencv_err(format!(
                         "Unsupported pixel size during init: {} bytes",
                         other
-                    )))
+                    )));
                 }
             };
 
@@ -270,22 +367,23 @@ pub mod libcamera_capture {
                 height,
                 stride: stride_usize,
                 bytes_per_pixel,
-                buffer,
+                pool,
                 color_format,
                 frame_counter: 0,
             })
         }
 
-        pub fn capture_into(&mut self, frame: &mut Mat) -> Result<bool> {
+        pub fn capture_frame(&mut self) -> Result<Option<CapturedFrame>> {
             let mut out_size = 0usize;
             let mut timestamp_ns = 0u64;
             let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+            let mut buffer = self.pool.acquire();
 
             let rc = unsafe {
                 libcamera_bridge_capture(
                     self.handle.as_ptr(),
-                    self.buffer.as_mut_ptr(),
-                    self.buffer.len(),
+                    buffer.as_mut_ptr(),
+                    buffer.len(),
                     &mut out_size as *mut usize,
                     &mut timestamp_ns as *mut u64,
                     err_buf.as_mut_ptr(),
@@ -311,38 +409,11 @@ pub mod libcamera_capture {
 
             if out_size == 0 {
                 println!("[bsw][libcamera] capture returned empty frame");
-                return Ok(false);
+                return Ok(None);
             }
 
-            let mat_type = match self.bytes_per_pixel {
-                3 => CV_8UC3,
-                4 => CV_8UC4,
-                other => {
-                    eprintln!(
-                        "[bsw][libcamera] unsupported pixel size {} (out_size={}, stride={})",
-                        other, out_size, self.stride
-                    );
-                    return Err(opencv_err(format!(
-                        "Unsupported pixel size from libcamera: {} bytes",
-                        other
-                    )));
-                }
-            };
-
-            let mut raw_view = unsafe {
-                Mat::new_rows_cols_with_data_unsafe(
-                    self.height as i32,
-                    self.width as i32,
-                    mat_type,
-                    self.buffer.as_mut_ptr() as *mut c_void,
-                    self.stride,
-                )?
-            };
-
-            *frame = raw_view.try_clone()?;
-
-            unsafe {
-                raw_view.release()?;
+            if out_size < buffer.len() {
+                buffer.truncate(out_size);
             }
 
             self.frame_counter = self.frame_counter.wrapping_add(1);
@@ -353,7 +424,17 @@ pub mod libcamera_capture {
                 );
             }
 
-            Ok(true)
+            let recycler: Arc<dyn BufferRecycler> = self.pool.clone();
+            let camera_buffer = CameraBuffer::from_vec_with_recycler(buffer, recycler);
+
+            Ok(Some(CapturedFrame::new(
+                Arc::new(camera_buffer),
+                self.width,
+                self.height,
+                self.stride,
+                self.bytes_per_pixel,
+                self.color_format,
+            )))
         }
 
         pub fn dimensions(&self) -> (u32, u32) {

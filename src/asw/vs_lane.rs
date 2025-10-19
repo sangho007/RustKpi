@@ -4,6 +4,7 @@ use crate::asw::lib::vs_lane_lib::*;
 use crate::rte::rte_dto::{DtoCamBirdEyeView, DtoCamLaneAngle, DtoCamProcessed};
 use crate::rte::rte_main::CameraChannels;
 use opencv::core::Mat;
+use opencv::prelude::MatTraitConst;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::RecvError;
@@ -13,7 +14,6 @@ const PROCESS_INTERVAL: u32 = 3;
 pub async fn runnable_pre_processing(
     id: &'static str,
     camera: CameraChannels,
-    
 ) -> opencv::Result<()> {
     let raw_tx = camera.raw_tx.clone();
     let processed_tx = camera.processed_tx.clone();
@@ -42,7 +42,8 @@ pub async fn runnable_pre_processing(
                 (alive_cnt % PROCESS_INTERVAL == 0) || last_processed_frame.is_none();
 
             let processed_arc: Arc<Mat> = if should_process {
-                let gray = pipeline.gray_scale(&cam_raw.img)?;
+                let bgr_mat = cam_raw.as_bgr_mat()?;
+                let gray = pipeline.gray_scale(&bgr_mat)?;
                 let blur = pipeline.noise_removal(&gray)?;
                 let edges = pipeline.edge_detection(&blur)?;
                 let closed = pipeline.morphology_close(&edges)?;
@@ -58,8 +59,14 @@ pub async fn runnable_pre_processing(
             };
 
             // 3. 결과 전송
-            let preprocessed_dto =
-                Arc::new(DtoCamProcessed::new(processed_arc, 1280, 720, alive_cnt));
+            let processed_width = processed_arc.cols() as u32;
+            let processed_height = processed_arc.rows() as u32;
+            let preprocessed_dto = Arc::new(DtoCamProcessed::new(
+                processed_arc.clone(),
+                processed_width,
+                processed_height,
+                alive_cnt,
+            ));
             let _ = processed_tx.send(preprocessed_dto);
 
             alive_cnt += 1;
@@ -118,8 +125,7 @@ pub async fn runnable_get_lane_angle(
                 Err(RecvError::Closed) => break,
             };
 
-            let should_process =
-                (alive_cnt % PROCESS_INTERVAL == 0) || last_birds_eye.is_none();
+            let should_process = (alive_cnt % PROCESS_INTERVAL == 0) || last_birds_eye.is_none();
 
             let (birds_eye_arc, steering_angle) = if should_process {
                 let roi_img = pipeline.roi(&cam_processed.img)?;
@@ -166,8 +172,12 @@ pub async fn runnable_get_lane_angle(
             let lane_angle_dto = Arc::new(DtoCamLaneAngle::new(steering_angle, alive_cnt));
             let _ = lane_angle_tx.send(lane_angle_dto);
 
-            let birds_eye_view_dto =
-                Arc::new(DtoCamBirdEyeView::new(birds_eye_arc, 1280, 720, alive_cnt));
+            let birds_eye_view_dto = Arc::new(DtoCamBirdEyeView::new(
+                birds_eye_arc.clone(),
+                birds_eye_arc.cols() as u32,
+                birds_eye_arc.rows() as u32,
+                alive_cnt,
+            ));
             let _ = bird_eye_tx.send(birds_eye_view_dto);
 
             alive_cnt += 1;
