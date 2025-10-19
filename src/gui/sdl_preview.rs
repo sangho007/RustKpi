@@ -110,6 +110,10 @@ impl SdlPreview {
     pub fn window_id(&self) -> u32 {
         self.canvas.window().id()
     }
+
+    pub fn raise(&mut self) {
+        self.canvas.window_mut().raise();
+    }
 }
 
 fn texture_config(format: ColorFormat) -> (PixelFormatEnum, bool) {

@@ -286,6 +286,10 @@ fn run_preview_thread(
             raw_enabled = false;
         }
     }
+    if let Some(preview) = raw_preview.as_mut() {
+        preview.raise();
+        thread::sleep(Duration::from_millis(50));
+    }
     if processed_enabled {
         let dummy = FramePacket {
             width: 640,
@@ -298,6 +302,10 @@ fn run_preview_thread(
             processed_enabled = false;
         }
     }
+    if let Some(preview) = processed_preview.as_mut() {
+        preview.raise();
+        thread::sleep(Duration::from_millis(50));
+    }
     if birds_enabled {
         let dummy = FramePacket {
             width: 640,
@@ -309,6 +317,10 @@ fn run_preview_thread(
         if ensure_preview(&mut birds_eye_preview, &env, "Bird's Eye View", &dummy).is_err() {
             birds_enabled = false;
         }
+    }
+    if let Some(preview) = birds_eye_preview.as_mut() {
+        preview.raise();
+        thread::sleep(Duration::from_millis(50));
     }
 
     while running {
