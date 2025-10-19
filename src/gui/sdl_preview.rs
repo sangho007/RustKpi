@@ -1,17 +1,13 @@
 use crate::rte::rte_dto::ColorFormat;
 use opencv::Error;
 use opencv::core::StsError;
-use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
+use sdl2::VideoSubsystem;
 
 pub struct SdlPreview {
-    _sdl: sdl2::Sdl,
     canvas: Canvas<Window>,
-    event_pump: sdl2::EventPump,
-    window_title: String,
     frame_width: u32,
     frame_height: u32,
     frame_format: ColorFormat,
@@ -20,17 +16,14 @@ pub struct SdlPreview {
 
 impl SdlPreview {
     pub fn new(
-        title: impl Into<String>,
+        video: &VideoSubsystem,
+        title: &str,
         width: u32,
         height: u32,
         format: ColorFormat,
     ) -> opencv::Result<Self> {
-        let sdl = sdl2::init().map_err(sdl_err)?;
-        let video = sdl.video().map_err(sdl_err)?;
-
-        let title_str = title.into();
         let window = video
-            .window(&title_str, width, height)
+            .window(title, width, height)
             .position_centered()
             .resizable()
             .allow_highdpi()
@@ -44,13 +37,8 @@ impl SdlPreview {
             .build()
             .map_err(sdl_err)?;
 
-        let event_pump = sdl.event_pump().map_err(sdl_err)?;
-
         Ok(Self {
-            _sdl: sdl,
             canvas,
-            event_pump,
-            window_title: title_str,
             frame_width: width,
             frame_height: height,
             frame_format: format,
@@ -65,7 +53,7 @@ impl SdlPreview {
         format: ColorFormat,
         data: &[u8],
         stride: usize,
-    ) -> opencv::Result<bool> {
+    ) -> opencv::Result<()> {
         if width != self.frame_width || height != self.frame_height {
             self.canvas
                 .window_mut()
@@ -114,25 +102,11 @@ impl SdlPreview {
         self.canvas.copy(&texture, None, None).map_err(sdl_err)?;
         self.canvas.present();
 
-        Ok(self.process_events())
+        Ok(())
     }
 
-    fn process_events(&mut self) -> bool {
-        for event in self.event_pump.poll_iter() {
-            match event {
-                Event::Quit { .. }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => return true,
-                _ => {}
-            }
-        }
-        false
-    }
-
-    pub fn title(&self) -> &str {
-        &self.window_title
+    pub fn window_id(&self) -> u32 {
+        self.canvas.window().id()
     }
 }
 

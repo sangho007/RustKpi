@@ -7,8 +7,11 @@ mod rte;
 
 use crate::rte::rte_dto::*;
 use crate::rte::rte_main::RteSystem;
+use gui::sdl_env::SdlEnv;
 use gui::sdl_preview::SdlPreview;
 use opencv::prelude::{MatTraitConst, MatTraitConstManual};
+use sdl2::event::{Event, WindowEvent};
+use sdl2::keyboard::Keycode;
 use std::sync::Arc;
 use tokio::{select, sync::broadcast::error::RecvError};
 
@@ -65,6 +68,7 @@ async fn main() -> opencv::Result<()> {
     let mut raw_preview: Option<SdlPreview> = None;
     let mut processed_preview: Option<SdlPreview> = None;
     let mut birds_eye_preview: Option<SdlPreview> = None;
+    let mut sdl_env = if DEBUG_ON { Some(SdlEnv::new()?) } else { None };
 
     // Main 스레드에서 GUI 이벤트 루프 실행
     'main_loop: loop {
@@ -88,7 +92,11 @@ async fn main() -> opencv::Result<()> {
             },
             result = processed_rx.recv() => match result {
                 Ok(cam_processed) => {
-                    latest_processed_frame = Some(cam_processed);
+                    let mut newest = cam_processed;
+                    while let Ok(newer) = processed_rx.try_recv() {
+                        newest = newer;
+                    }
+                    latest_processed_frame = Some(newest);
                 }
                 Err(RecvError::Lagged(n)) => {
                     eprintln!("[MAIN] Processed frame lagged by {}", n);
@@ -100,7 +108,11 @@ async fn main() -> opencv::Result<()> {
             },
             result = birds_eye_rx.recv() => match result {
                 Ok(birds_eye) => {
-                    latest_birds_eye_frame = Some(birds_eye);
+                    let mut newest = birds_eye;
+                    while let Ok(newer) = birds_eye_rx.try_recv() {
+                        newest = newer;
+                    }
+                    latest_birds_eye_frame = Some(newest);
                 }
                 Err(RecvError::Lagged(n)) => {
                     eprintln!("[MAIN] Bird eye stream lagged by {}", n);
@@ -141,11 +153,15 @@ async fn main() -> opencv::Result<()> {
                 latest_raw_frame = Some(newer);
             }
 
-            let mut should_quit = false;
+            let env = match sdl_env.as_mut() {
+                Some(env) => env,
+                None => continue,
+            };
 
             if let Some(frame) = &latest_raw_frame {
                 if raw_preview.is_none() {
                     raw_preview = Some(SdlPreview::new(
+                        &env.video,
                         "Raw View",
                         frame.width,
                         frame.height,
@@ -154,7 +170,7 @@ async fn main() -> opencv::Result<()> {
                 }
 
                 if let Some(preview) = raw_preview.as_mut() {
-                    should_quit |= preview.present(
+                    preview.present(
                         frame.width,
                         frame.height,
                         frame.color_format,
@@ -171,6 +187,7 @@ async fn main() -> opencv::Result<()> {
 
                 if processed_preview.is_none() {
                     processed_preview = Some(SdlPreview::new(
+                        &env.video,
                         "Processed View",
                         processed.width,
                         processed.height,
@@ -179,7 +196,7 @@ async fn main() -> opencv::Result<()> {
                 }
 
                 if let Some(preview) = processed_preview.as_mut() {
-                    should_quit |= preview.present(
+                    preview.present(
                         processed.width,
                         processed.height,
                         ColorFormat::Bgr,
@@ -196,6 +213,7 @@ async fn main() -> opencv::Result<()> {
 
                 if birds_eye_preview.is_none() {
                     birds_eye_preview = Some(SdlPreview::new(
+                        &env.video,
                         "Bird's Eye View",
                         birds_eye.width,
                         birds_eye.height,
@@ -204,13 +222,31 @@ async fn main() -> opencv::Result<()> {
                 }
 
                 if let Some(preview) = birds_eye_preview.as_mut() {
-                    should_quit |= preview.present(
+                    preview.present(
                         birds_eye.width,
                         birds_eye.height,
                         ColorFormat::Bgr,
                         data,
                         stride,
                     )?;
+                }
+            }
+
+            let mut should_quit = false;
+            for event in env.event_pump.poll_iter() {
+                match event {
+                    Event::Quit { .. }
+                    | Event::KeyDown {
+                        keycode: Some(Keycode::Escape),
+                        ..
+                    }
+                    | Event::Window {
+                        win_event: WindowEvent::Close,
+                        ..
+                    } => {
+                        should_quit = true;
+                    }
+                    _ => {}
                 }
             }
 
