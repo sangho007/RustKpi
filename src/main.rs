@@ -70,7 +70,11 @@ async fn main() -> opencv::Result<()> {
         select! {
             result = camraw_rx.recv() => match result {
                 Ok(camraw) => {
-                    latest_raw_frame = Some(camraw);
+                    let mut newest = camraw;
+                    while let Ok(newer) = camraw_rx.try_recv() {
+                        newest = newer;
+                    }
+                    latest_raw_frame = Some(newest);
                 }
                 Err(RecvError::Lagged(n)) => {
                     eprintln!("[MAIN] raw frame lagged by {}", n);
