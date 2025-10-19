@@ -797,15 +797,16 @@ impl Pipeline {
         // -------------------------------------------
         // 9) ploty에 따라 최종 x좌표 (ax^2 + bx + c)
         // -------------------------------------------
-        let mut left_fitx = Vec::with_capacity(self.ploty.len());
-        let mut right_fitx = Vec::with_capacity(self.ploty.len());
-        for &yv in &self.ploty {
-            let lx = left_fit_avg[0] * yv * yv + left_fit_avg[1] * yv + left_fit_avg[2];
-            left_fitx.push(lx);
-
-            let rx = right_fit_avg[0] * yv * yv + right_fit_avg[1] * yv + right_fit_avg[2];
-            right_fitx.push(rx);
-        }
+        let left_fitx: Vec<f64> = self
+            .ploty
+            .par_iter()
+            .map(|&yv| left_fit_avg[0] * yv * yv + left_fit_avg[1] * yv + left_fit_avg[2])
+            .collect();
+        let right_fitx: Vec<f64> = self
+            .ploty
+            .par_iter()
+            .map(|&yv| right_fit_avg[0] * yv * yv + right_fit_avg[1] * yv + right_fit_avg[2])
+            .collect();
 
         // -------------------------------------------
         // 10) 양쪽 다 인식 안 되면 기준점 리셋
@@ -872,7 +873,7 @@ impl Pipeline {
         // -------------------------------------------
         // 3) 이전 차선 주변의 픽셀들만 선택
         // -------------------------------------------
-        let row_lane_points: Vec<(Vec<(i32, i32)>, Vec<(i32, i32)>)> = (0..height)
+        let (left_lane_points, right_lane_points) = (0..height)
             .into_par_iter()
             .map(|y| {
                 let y_f64 = y as f64;
@@ -918,28 +919,34 @@ impl Pipeline {
 
                 (left_lane_local, right_lane_local)
             })
-            .collect();
-
-        let mut left_lane_points: Vec<(i32, i32)> = Vec::new();
-        let mut right_lane_points: Vec<(i32, i32)> = Vec::new();
-        for (mut left_local, mut right_local) in row_lane_points {
-            left_lane_points.append(&mut left_local);
-            right_lane_points.append(&mut right_local);
-        }
+            .reduce(
+                || (Vec::new(), Vec::new()),
+                |mut acc, (mut left_local, mut right_local)| {
+                    acc.0.append(&mut left_local);
+                    acc.1.append(&mut right_local);
+                    acc
+                },
+            );
 
         // -------------------------------------------
         // 4) 최종 (x,y) 좌표 분리 & 차선 픽셀 개수로 인식 여부 판정
         // -------------------------------------------
-        let (mut leftx_vals, mut lefty_vals) = (Vec::new(), Vec::new());
-        for &(y, x) in &left_lane_points {
-            leftx_vals.push(x as f64);
-            lefty_vals.push(y as f64);
-        }
-        let (mut rightx_vals, mut righty_vals) = (Vec::new(), Vec::new());
-        for &(y, x) in &right_lane_points {
-            rightx_vals.push(x as f64);
-            righty_vals.push(y as f64);
-        }
+        let leftx_vals: Vec<f64> = left_lane_points
+            .par_iter()
+            .map(|&(_, x)| x as f64)
+            .collect();
+        let lefty_vals: Vec<f64> = left_lane_points
+            .par_iter()
+            .map(|&(y, _)| y as f64)
+            .collect();
+        let rightx_vals: Vec<f64> = right_lane_points
+            .par_iter()
+            .map(|&(_, x)| x as f64)
+            .collect();
+        let righty_vals: Vec<f64> = right_lane_points
+            .par_iter()
+            .map(|&(y, _)| y as f64)
+            .collect();
 
         let left_lane_detected = leftx_vals.len() >= self.lane_points_threshold;
         let right_lane_detected = rightx_vals.len() >= self.lane_points_threshold;
@@ -976,15 +983,20 @@ impl Pipeline {
             mean_of_last_10(&self.right_c),
         ];
 
-        let mut left_fitx = Vec::with_capacity(self.ploty.len());
-        let mut right_fitx = Vec::with_capacity(self.ploty.len());
-        for &yv in &self.ploty {
-            let lx = new_left_fit_avg[0] * yv * yv + new_left_fit_avg[1] * yv + new_left_fit_avg[2];
-            left_fitx.push(lx);
-            let rx =
-                new_right_fit_avg[0] * yv * yv + new_right_fit_avg[1] * yv + new_right_fit_avg[2];
-            right_fitx.push(rx);
-        }
+        let left_fitx: Vec<f64> = self
+            .ploty
+            .par_iter()
+            .map(|&yv| {
+                new_left_fit_avg[0] * yv * yv + new_left_fit_avg[1] * yv + new_left_fit_avg[2]
+            })
+            .collect();
+        let right_fitx: Vec<f64> = self
+            .ploty
+            .par_iter()
+            .map(|&yv| {
+                new_right_fit_avg[0] * yv * yv + new_right_fit_avg[1] * yv + new_right_fit_avg[2]
+            })
+            .collect();
 
         // -------------------------------------------
         // 7) 결과 시각화
