@@ -273,6 +273,14 @@ fn run_preview_thread(
     let mut pending_processed: Option<FramePacket> = None;
     let mut pending_bird: Option<FramePacket> = None;
     let mut last_present = Instant::now();
+    const WINDOW_MARGIN: i32 = 40;
+    const WINDOW_WIDTH: i32 = 640;
+    const WINDOW_HEIGHT: i32 = 480;
+    const RAW_WINDOW_POS: (i32, i32) = (WINDOW_MARGIN, WINDOW_MARGIN);
+    const PROCESSED_WINDOW_POS: (i32, i32) =
+        (WINDOW_MARGIN + WINDOW_WIDTH + WINDOW_MARGIN, WINDOW_MARGIN);
+    const BIRD_WINDOW_POS: (i32, i32) =
+        (WINDOW_MARGIN, WINDOW_MARGIN + WINDOW_HEIGHT + WINDOW_MARGIN);
 
     if raw_enabled {
         let dummy = FramePacket {
@@ -282,7 +290,15 @@ fn run_preview_thread(
             format: ColorFormat::Bgr,
             payload: FramePayload::Owned(vec![0; (640 * 480 * 3) as usize]),
         };
-        if ensure_preview(&mut raw_preview, &env, "Raw View", &dummy).is_err() {
+        if ensure_preview(
+            &mut raw_preview,
+            &env,
+            "Raw View",
+            &dummy,
+            Some(RAW_WINDOW_POS),
+        )
+        .is_err()
+        {
             raw_enabled = false;
         }
     }
@@ -298,7 +314,15 @@ fn run_preview_thread(
             format: ColorFormat::Gray,
             payload: FramePayload::Owned(vec![0; (640 * 480) as usize]),
         };
-        if ensure_preview(&mut processed_preview, &env, "Processed View", &dummy).is_err() {
+        if ensure_preview(
+            &mut processed_preview,
+            &env,
+            "Processed View",
+            &dummy,
+            Some(PROCESSED_WINDOW_POS),
+        )
+        .is_err()
+        {
             processed_enabled = false;
         }
     }
@@ -314,7 +338,15 @@ fn run_preview_thread(
             format: ColorFormat::Gray,
             payload: FramePayload::Owned(vec![0; (640 * 480) as usize]),
         };
-        if ensure_preview(&mut birds_eye_preview, &env, "Bird's Eye View", &dummy).is_err() {
+        if ensure_preview(
+            &mut birds_eye_preview,
+            &env,
+            "Bird's Eye View",
+            &dummy,
+            Some(BIRD_WINDOW_POS),
+        )
+        .is_err()
+        {
             birds_enabled = false;
         }
     }
@@ -355,7 +387,15 @@ fn run_preview_thread(
         if should_present {
             if raw_enabled {
                 if let Some(packet) = pending_raw.take() {
-                    if ensure_preview(&mut raw_preview, &env, "Raw View", &packet).is_ok() {
+                    if ensure_preview(
+                        &mut raw_preview,
+                        &env,
+                        "Raw View",
+                        &packet,
+                        Some(RAW_WINDOW_POS),
+                    )
+                    .is_ok()
+                    {
                         present_packet(raw_preview.as_mut(), &packet, true);
                     }
                 }
@@ -365,8 +405,14 @@ fn run_preview_thread(
 
             if processed_enabled {
                 if let Some(packet) = pending_processed.take() {
-                    if ensure_preview(&mut processed_preview, &env, "Processed View", &packet)
-                        .is_ok()
+                    if ensure_preview(
+                        &mut processed_preview,
+                        &env,
+                        "Processed View",
+                        &packet,
+                        Some(PROCESSED_WINDOW_POS),
+                    )
+                    .is_ok()
                     {
                         present_packet(processed_preview.as_mut(), &packet, false);
                     }
@@ -377,8 +423,14 @@ fn run_preview_thread(
 
             if birds_enabled {
                 if let Some(packet) = pending_bird.take() {
-                    if ensure_preview(&mut birds_eye_preview, &env, "Bird's Eye View", &packet)
-                        .is_ok()
+                    if ensure_preview(
+                        &mut birds_eye_preview,
+                        &env,
+                        "Bird's Eye View",
+                        &packet,
+                        Some(BIRD_WINDOW_POS),
+                    )
+                    .is_ok()
                     {
                         present_packet(birds_eye_preview.as_mut(), &packet, false);
                     }
@@ -485,9 +537,17 @@ fn ensure_preview(
     env: &SdlEnv,
     title: &str,
     frame: &FramePacket,
+    position: Option<(i32, i32)>,
 ) -> opencv::Result<()> {
     if target.is_none() {
-        let preview = SdlPreview::new(&env.video, title, frame.width, frame.height, frame.format)?;
+        let preview = SdlPreview::new(
+            &env.video,
+            title,
+            frame.width,
+            frame.height,
+            frame.format,
+            position,
+        )?;
         *target = Some(preview);
     }
     Ok(())

@@ -21,10 +21,15 @@ impl SdlPreview {
         width: u32,
         height: u32,
         format: ColorFormat,
+        position: Option<(i32, i32)>,
     ) -> opencv::Result<Self> {
-        let mut window = video
-            .window(title, width, height)
-            .position_centered()
+        let builder = video.window(title, width, height);
+        let builder = if let Some((x, y)) = position {
+            builder.position(x, y)
+        } else {
+            builder.position_centered()
+        };
+        let mut window = builder
             .resizable()
             .allow_highdpi()
             .build()
