@@ -23,7 +23,7 @@ impl SdlPreview {
         format: ColorFormat,
         position: Option<(i32, i32)>,
     ) -> opencv::Result<Self> {
-        let builder = video.window(title, width, height);
+        let mut builder = video.window(title, width, height);
         let builder = if let Some((x, y)) = position {
             builder.position(x, y)
         } else {
