@@ -7,6 +7,13 @@ pub struct PerspectiveCalibration {
 }
 
 impl PerspectiveCalibration {
+    pub fn new(source: [(f32, f32); 4], destination: [(f32, f32); 4]) -> Self {
+        Self {
+            source,
+            destination,
+        }
+    }
+
     pub fn source_points(&self) -> Vec<Point2f> {
         self.source
             .iter()

@@ -6,6 +6,10 @@ pub struct RoiCalibration {
 }
 
 impl RoiCalibration {
+    pub fn new(vertices: [(i32, i32); 4]) -> Self {
+        Self { vertices }
+    }
+
     pub fn to_points(&self) -> Vec<Point> {
         self.vertices
             .iter()

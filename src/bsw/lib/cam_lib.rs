@@ -5,10 +5,13 @@
 //! every source uniformly.
 
 use crate::rte::rte_dto::{CameraBuffer, ColorFormat};
-use opencv::core::Mat;
+use opencv::core::{Mat, Rect, Size};
 use opencv::prelude::{MatTraitConst, MatTraitConstManual, VideoCaptureTrait};
-use opencv::{Result, videoio};
+use opencv::{Result, imgproc, videoio};
 use std::sync::Arc;
+
+pub const TARGET_FRAME_WIDTH: i32 = 640;
+pub const TARGET_FRAME_HEIGHT: i32 = 480;
 
 /// Immutable metadata plus the pixel buffer for a captured frame.
 /// Buffer ownership is shared through `Arc` so downstream tasks may hold
@@ -42,6 +45,46 @@ impl CapturedFrame {
     }
 }
 
+fn fit_frame_to_target(frame: &Mat) -> Result<Mat> {
+    let src_width = frame.cols();
+    let src_height = frame.rows();
+    if src_width == 0 || src_height == 0 {
+        return Ok(frame.clone());
+    }
+
+    let target_ratio = TARGET_FRAME_WIDTH as f64 / TARGET_FRAME_HEIGHT as f64;
+    let src_ratio = src_width as f64 / src_height as f64;
+
+    let view = if (src_ratio - target_ratio).abs() < f64::EPSILON {
+        frame.clone()
+    } else if src_ratio > target_ratio {
+        let crop_width = ((src_height as f64) * target_ratio)
+            .round()
+            .clamp(1.0, src_width as f64) as i32;
+        let offset_x = ((src_width - crop_width) / 2).max(0);
+        let rect = Rect::new(offset_x, 0, crop_width, src_height);
+        frame.roi(rect)?.try_clone()?
+    } else {
+        let crop_height = ((src_width as f64) / target_ratio)
+            .round()
+            .clamp(1.0, src_height as f64) as i32;
+        let offset_y = ((src_height - crop_height) / 2).max(0);
+        let rect = Rect::new(0, offset_y, src_width, crop_height);
+        frame.roi(rect)?.try_clone()?
+    };
+
+    let mut resized = Mat::default();
+    imgproc::resize(
+        &view,
+        &mut resized,
+        Size::new(TARGET_FRAME_WIDTH, TARGET_FRAME_HEIGHT),
+        0.0,
+        0.0,
+        imgproc::INTER_LINEAR,
+    )?;
+    Ok(resized)
+}
+
 /// 프레임을 읽어오는 동작을 추상화하는 Trait.
 ///
 /// - `Ok(Some(frame))` : 새 픽셀 데이터가 준비됨
@@ -60,11 +103,13 @@ impl FrameCapture for videoio::VideoCapture {
             return Ok(None);
         }
 
-        let width = frame.cols() as u32;
-        let height = frame.rows() as u32;
-        let bytes_per_pixel = frame.elem_size()? as usize;
-        let stride = width as usize * bytes_per_pixel;
-        let data = frame.data_bytes()?;
+        let aligned = fit_frame_to_target(&frame)?;
+
+        let width = aligned.cols() as u32;
+        let height = aligned.rows() as u32;
+        let bytes_per_pixel = aligned.elem_size()? as usize;
+        let stride = aligned.step1(0)? as usize;
+        let data = aligned.data_bytes()?;
         let buffer = CameraBuffer::from_vec(data.to_vec());
 
         Ok(Some(CapturedFrame::new(

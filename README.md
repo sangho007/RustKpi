@@ -91,6 +91,16 @@ Broadcast 채널을 활용하여 각 Task가 비동기적으로 데이터를 주
 - **통합 실행 (`src/main.rs`)**  
   시스템 초기화, Task 생성, 디버깅용 GUI (OpenCV HighGUI).
 
+### 카메라 해상도 & 캘리브레이션 프리셋
+- 기본 파이프라인은 4:3 비율의 640×480 해상도(`LaneCalibrationPreset::Vga640x480`)에 맞춰져 있습니다.  
+  `LaneCalibration::preset(LaneCalibrationPreset::Hd1280x720)`을 사용하면 기존 1280×720 파라미터 세트도 그대로 활용할 수 있습니다.
+- 샘플 영상 `video/challenge.mp4`는 16:9(1280×720)이므로, 아래 스크립트로 중앙 크롭+리사이즈한 버전을 생성하면 실제 카메라 해상도와 동일한 조건에서 테스트할 수 있습니다.
+
+```bash
+python tools/resize_video.py --input video/challenge.mp4 \
+    --output video/challenge_640x480.mp4
+```
+
 ## 하드웨어 구성
 - Raspberry Pi 4B (64-bit OS)
 - RC 카 섀시 및 DC 모터, 스티어링 서보

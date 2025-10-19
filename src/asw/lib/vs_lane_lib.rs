@@ -1,4 +1,4 @@
-use crate::calibration::LaneCalibration;
+use crate::calibration::{LaneCalibration, LaneCalibrationPreset};
 use opencv::{
     Result,
     core::AlgorithmHint::ALGO_HINT_DEFAULT,
@@ -148,7 +148,7 @@ impl Pipeline {
     /// - `Result`와 `?` 연산자를 통해 에러를 핸들링하며, 예외(exception)가 없어
     ///   제어 흐름이 더 명시적이고 예측 가능합니다.
     pub fn new_with_settings(use_kalman_filter: bool) -> Result<Self> {
-        let calibration = LaneCalibration::default();
+        let calibration = LaneCalibration::preset(LaneCalibrationPreset::Vga640x480);
         let camera = calibration.camera;
         let image_calibration = calibration.image;
         let processing = calibration.processing;

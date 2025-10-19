@@ -5,7 +5,7 @@
 // asw/vision
 
 use crate::asw::lib::vs_lane_lib::*;
-use crate::calibration::LaneCalibration;
+use crate::calibration::{LaneCalibration, LaneCalibrationPreset};
 use crate::rte::rte_dto::{ColorFormat, DtoCamBirdEyeView, DtoCamLaneAngle, DtoCamProcessed};
 use crate::rte::rte_main::CameraChannels;
 use opencv::core::Mat;
@@ -24,7 +24,7 @@ pub async fn runnable_pre_processing(
     let raw_tx = camera.raw_tx.clone();
     let processed_tx = camera.processed_tx.clone();
     let (done_tx, done_rx) = oneshot::channel();
-    let calibration = LaneCalibration::default();
+    let calibration = LaneCalibration::preset(LaneCalibrationPreset::Vga640x480);
     let runtime_calibration = calibration.runtime;
     let lane_task_config = LaneTaskConfig::new(calibration.processing.kalman.enabled);
 
@@ -140,7 +140,7 @@ pub async fn runnable_get_lane_angle(
     let bird_eye_tx = camera.bird_eye_tx.clone();
     let lane_angle_tx = camera.lane_angle_tx.clone();
     let (done_tx, done_rx) = oneshot::channel();
-    let calibration = LaneCalibration::default();
+    let calibration = LaneCalibration::preset(LaneCalibrationPreset::Vga640x480);
     let runtime_calibration = calibration.runtime;
     let lane_task_config = LaneTaskConfig::new(calibration.processing.kalman.enabled);
 
