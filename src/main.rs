@@ -87,6 +87,7 @@ async fn main() -> opencv::Result<()> {
 
     for handle in tasks {
         handle.abort();
+        let _ = handle.await;
     }
 
     result
