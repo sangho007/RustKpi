@@ -22,13 +22,15 @@ impl SdlPreview {
         height: u32,
         format: ColorFormat,
     ) -> opencv::Result<Self> {
-        let window = video
+        let mut window = video
             .window(title, width, height)
             .position_centered()
             .resizable()
             .allow_highdpi()
             .build()
             .map_err(sdl_err)?;
+
+        window.raise();
 
         let canvas = window
             .into_canvas()
