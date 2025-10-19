@@ -68,6 +68,7 @@ async fn main() -> opencv::Result<()> {
     // Main 스레드에서 GUI 이벤트 루프 실행
     'main_loop: loop {
         select! {
+            biased;
             result = camraw_rx.recv() => match result {
                 Ok(camraw) => {
                     let mut newest = camraw;

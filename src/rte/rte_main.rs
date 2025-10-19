@@ -15,7 +15,7 @@ pub type UltraObstacleSender = broadcast::Sender<Arc<DtoUltraSonicObstacle>>;
 pub type ServoCtrlSender = broadcast::Sender<Arc<DtoServoCtrl>>;
 pub type DcMotorCtrlSender = broadcast::Sender<Arc<DtoDcMotorCtrl>>;
 
-const CAM_RAW_CAPACITY: usize = 6;
+const CAM_RAW_CAPACITY: usize = 2;
 const CAM_PROCESSED_CAPACITY: usize = 6;
 const CAM_BIRD_EYE_CAPACITY: usize = 4;
 const CAM_LANE_ANGLE_CAPACITY: usize = 8;
