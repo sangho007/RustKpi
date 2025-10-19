@@ -14,7 +14,13 @@ pub async fn ea_cam_provider(camera: CameraChannels) -> Result<()> {
 
     let capture_thread = std::thread::Builder::new()
         .name("camera-capture".to_string())
-        .spawn(move || camera_capture_loop(frame_tx))?;
+        .spawn(move || camera_capture_loop(frame_tx))
+        .map_err(|e| {
+            opencv::Error::new(
+                opencv::core::StsError,
+                format!("Failed to spawn camera capture thread: {}", e),
+            )
+        })?;
 
     let mut alive_cnt = 0u32;
 
@@ -52,7 +58,7 @@ pub async fn ea_cam_provider(camera: CameraChannels) -> Result<()> {
     }
 }
 
-fn camera_capture_loop(mut frame_tx: mpsc::Sender<cam_lib::CapturedFrame>) -> Result<()> {
+fn camera_capture_loop(frame_tx: mpsc::Sender<cam_lib::CapturedFrame>) -> Result<()> {
     // 비디오 파일이나 카메라 장치를 엽니다.
     let cammode = true;
     let mut cap: Box<dyn cam_lib::FrameCapture> = if cammode {
