@@ -4,14 +4,12 @@
 //! OpenCV's `VideoCapture` and the libcamera bridge so upper layers can treat
 //! every source uniformly.
 
+use crate::calibration::camera::CameraCalibration;
 use crate::rte::rte_dto::{CameraBuffer, ColorFormat};
 use opencv::core::{Mat, Rect, Size};
 use opencv::prelude::{MatTraitConst, MatTraitConstManual, VideoCaptureTrait};
 use opencv::{Result, imgproc, videoio};
 use std::sync::Arc;
-
-pub const TARGET_FRAME_WIDTH: i32 = 640;
-pub const TARGET_FRAME_HEIGHT: i32 = 480;
 
 /// Immutable metadata plus the pixel buffer for a captured frame.
 /// Buffer ownership is shared through `Arc` so downstream tasks may hold
@@ -46,13 +44,16 @@ impl CapturedFrame {
 }
 
 fn fit_frame_to_target(frame: &Mat) -> Result<Mat> {
+    let calibration = CameraCalibration::default();
+    let target_width = calibration.width;
+    let target_height = calibration.height;
     let src_width = frame.cols();
     let src_height = frame.rows();
     if src_width == 0 || src_height == 0 {
         return Ok(frame.clone());
     }
 
-    let target_ratio = TARGET_FRAME_WIDTH as f64 / TARGET_FRAME_HEIGHT as f64;
+    let target_ratio = target_width as f64 / target_height as f64;
     let src_ratio = src_width as f64 / src_height as f64;
 
     let view = if (src_ratio - target_ratio).abs() < f64::EPSILON {
@@ -77,7 +78,7 @@ fn fit_frame_to_target(frame: &Mat) -> Result<Mat> {
     imgproc::resize(
         &view,
         &mut resized,
-        Size::new(TARGET_FRAME_WIDTH, TARGET_FRAME_HEIGHT),
+        Size::new(target_width, target_height),
         0.0,
         0.0,
         imgproc::INTER_LINEAR,
@@ -129,7 +130,7 @@ impl FrameCapture for libcamera_capture::LibcameraCapture {
     }
 }
 pub mod libcamera_capture {
-    //! Thin wrapper around the C++ libcamera bridge (see `native/libcamera_bridge`).
+    //! Thin wrapper around the C++ libcamera bridge (see `src/bsw/lib/libcamera_bridge.cpp`).
     //! Converts raw buffers into `CapturedFrame` and recycles memory via a pool.
     use super::CapturedFrame;
     use crate::rte::rte_dto::{BufferRecycler, CameraBuffer, ColorFormat};

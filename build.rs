@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     let mut build = cc::Build::new();
-    let bridge_file = "native/libcamera_bridge/libcamera_bridge.cpp";
+    let bridge_file = "src/bsw/lib/libcamera_bridge.cpp";
 
     let mut include_paths: Vec<PathBuf> = Vec::new();
     let mut link_libs: Vec<String> = Vec::new();

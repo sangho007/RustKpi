@@ -1,4 +1,5 @@
 // 필요한 모듈들을 use 키워드로 가져옵니다.
+use crate::calibration::traffic_light::{TrafficLightCalibration, TrafficLightColorThreshold};
 use dbscan::*;
 use opencv::{
     Result,
@@ -16,49 +17,38 @@ pub enum TrafficLightColor {
     Off, // 소등 상태
 }
 
-// 클러스터의 크기를 기반으로 탐지할 최소 픽셀 수
-const MIN_PIXEL_THRESHOLD: usize = 100;
-
-// epsilon: 같은 클러스터로 간주할 최대 거리 (픽셀 단위)
-// min_points: 클러스터를 형성하기 위한 최소 점의 개수
-const EPSILON: f64 = 20.0;
-const MIN_POINTS: usize = 15;
-
 pub struct Pipeline {
-    width: i32,
-    height: i32,
     vertices: Vec<Point>,
     pub red_threshold: ((u8, u8, u8), (u8, u8, u8)),
     pub yellow_threshold: ((u8, u8, u8), (u8, u8, u8)),
     pub green_threshold: ((u8, u8, u8), (u8, u8, u8)),
     pub current_traffic_light_color: TrafficLightColor,
+    min_pixel_threshold: usize,
+    dbscan_epsilon: f64,
+    dbscan_min_points: usize,
 }
 
 impl Pipeline {
-    pub fn new() -> Self {
-        let width = 1280;
-        let height = 720;
+    pub fn new(calibration: TrafficLightCalibration) -> Self {
+        let vertices = calibration
+            .roi_vertices
+            .iter()
+            .map(|&(x, y)| Point::new(x, y))
+            .collect::<Vec<_>>();
 
-        let vertices = vec![
-            Point::new(200, height - 100),
-            Point::new(width / 2 - 100, height / 2 + 120),
-            Point::new(width / 2 + 100, height / 2 + 120),
-            Point::new(width - 200, height - 100),
-        ];
-
-        let red_threshold = ((0, 120, 70), (10, 255, 255));
-        let yellow_threshold = ((20, 100, 100), (30, 255, 255));
-        let green_threshold = ((50, 100, 100), (70, 255, 255));
-        let current_traffic_light_color = TrafficLightColor::Off;
+        let red_threshold = thresholds_to_tuple(calibration.red_threshold);
+        let yellow_threshold = thresholds_to_tuple(calibration.yellow_threshold);
+        let green_threshold = thresholds_to_tuple(calibration.green_threshold);
 
         Self {
-            width,
-            height,
             vertices,
             red_threshold,
             yellow_threshold,
             green_threshold,
-            current_traffic_light_color,
+            current_traffic_light_color: TrafficLightColor::Off,
+            min_pixel_threshold: calibration.min_pixel_threshold,
+            dbscan_epsilon: calibration.dbscan_epsilon,
+            dbscan_min_points: calibration.dbscan_min_points,
         }
     }
 
@@ -96,17 +86,17 @@ impl Pipeline {
         let yellow_pixels = self.find_largest_cluster(&yellow_mask_denoised);
         let green_pixels = self.find_largest_cluster(&green_mask_denoised);
 
-        let detected_color = if red_pixels > MIN_PIXEL_THRESHOLD
+        let detected_color = if red_pixels > self.min_pixel_threshold
             && red_pixels >= yellow_pixels
             && red_pixels >= green_pixels
         {
             TrafficLightColor::Red
-        } else if yellow_pixels > MIN_PIXEL_THRESHOLD
+        } else if yellow_pixels > self.min_pixel_threshold
             && yellow_pixels >= red_pixels
             && yellow_pixels >= green_pixels
         {
             TrafficLightColor::Yellow
-        } else if green_pixels > MIN_PIXEL_THRESHOLD
+        } else if green_pixels > self.min_pixel_threshold
             && green_pixels >= red_pixels
             && green_pixels >= yellow_pixels
         {
@@ -185,7 +175,7 @@ impl Pipeline {
         }
 
         // DBSCAN 모델을 설정하고 실행합니다.
-        let mut model = dbscan::Model::new(EPSILON, MIN_POINTS);
+        let model = dbscan::Model::new(self.dbscan_epsilon, self.dbscan_min_points);
 
         let points_as_vecs: Vec<Vec<f64>> = points.into_iter().map(|p| p.to_vec()).collect();
         let result = model.run(&points_as_vecs);
@@ -206,4 +196,8 @@ impl Pipeline {
         // 가장 큰 클러스터의 크기를 찾습니다.
         cluster_counts.into_values().max().unwrap_or(0)
     }
+}
+
+fn thresholds_to_tuple(threshold: TrafficLightColorThreshold) -> ((u8, u8, u8), (u8, u8, u8)) {
+    (threshold.lower, threshold.upper)
 }

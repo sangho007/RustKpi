@@ -1,2 +1,5 @@
-pub const TRIGGER_PIN: u8 = 23;
-pub const ECHO_PIN: u8 = 24;
+use crate::calibration::ultrasonic::UltrasonicCalibration;
+
+pub fn ultrasonic_calibration() -> UltrasonicCalibration {
+    UltrasonicCalibration::default()
+}

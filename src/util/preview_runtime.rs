@@ -1,0 +1,425 @@
+use crate::util::sdl_env::SdlEnv;
+use crate::util::preview_window::SdlPreview;
+use crate::rte::rte_dto::{CameraBuffer, ColorFormat};
+use opencv::core::{Mat, Size};
+use opencv::imgproc;
+use opencv::prelude::MatTraitConstManual;
+use sdl2::event::{Event, WindowEvent};
+use sdl2::keyboard::Keycode;
+use std::sync::{mpsc, Arc};
+use std::thread;
+use std::time::{Duration, Instant};
+
+pub struct PreviewRuntime {
+    pub tx: mpsc::Sender<PreviewMessage>,
+    pub event_rx: mpsc::Receiver<PreviewEvent>,
+    pub handle: thread::JoinHandle<()>,
+}
+
+pub struct FramePacket {
+    pub width: u32,
+    pub height: u32,
+    pub stride: usize,
+    pub format: ColorFormat,
+    pub payload: FramePayload,
+}
+
+pub enum FramePayload {
+    Camera(Arc<CameraBuffer>),
+    Mat(Arc<Mat>),
+    Owned(Vec<u8>),
+}
+
+pub enum PreviewMessage {
+    Raw(FramePacket),
+    Processed(FramePacket),
+    Bird(FramePacket),
+}
+
+pub enum PreviewEvent {
+    Quit,
+}
+
+pub fn spawn_preview_thread() -> opencv::Result<PreviewRuntime> {
+    let (tx, rx) = mpsc::channel::<PreviewMessage>();
+    let (event_tx, event_rx) = mpsc::channel::<PreviewEvent>();
+    let handle = thread::Builder::new()
+        .name("sdl-preview".to_string())
+        .spawn(move || {
+            if let Err(err) = run_preview_thread(rx, event_tx) {
+                eprintln!("[GUI] preview thread error: {}", err);
+            }
+        })
+        .map_err(|e| {
+            opencv::Error::new(
+                opencv::core::StsError,
+                format!("Failed to spawn preview thread: {}", e),
+            )
+        })?;
+
+    Ok(PreviewRuntime {
+        tx,
+        event_rx,
+        handle,
+    })
+}
+
+fn run_preview_thread(
+    rx: mpsc::Receiver<PreviewMessage>,
+    event_tx: mpsc::Sender<PreviewEvent>,
+) -> opencv::Result<()> {
+    let mut env = SdlEnv::new()?;
+    let mut raw_preview: Option<SdlPreview> = None;
+    let mut processed_preview: Option<SdlPreview> = None;
+    let mut birds_eye_preview: Option<SdlPreview> = None;
+    let mut raw_enabled = true;
+    let mut processed_enabled = true;
+    let mut birds_enabled = true;
+    let mut running = true;
+
+    let mut pending_raw: Option<FramePacket> = None;
+    let mut pending_processed: Option<FramePacket> = None;
+    let mut pending_bird: Option<FramePacket> = None;
+    let mut last_present = Instant::now();
+    const WINDOW_MARGIN: i32 = 40;
+    const WINDOW_WIDTH: i32 = 640;
+    const WINDOW_HEIGHT: i32 = 480;
+    const RAW_WINDOW_POS: (i32, i32) = (WINDOW_MARGIN, WINDOW_MARGIN);
+    const PROCESSED_WINDOW_POS: (i32, i32) =
+        (WINDOW_MARGIN + WINDOW_WIDTH + WINDOW_MARGIN, WINDOW_MARGIN);
+    const BIRD_WINDOW_POS: (i32, i32) =
+        (WINDOW_MARGIN, WINDOW_MARGIN + WINDOW_HEIGHT + WINDOW_MARGIN);
+
+    if raw_enabled {
+        let dummy = FramePacket {
+            width: 640,
+            height: 480,
+            stride: 640 * 3,
+            format: ColorFormat::Bgr,
+            payload: FramePayload::Owned(vec![0; (640 * 480 * 3) as usize]),
+        };
+        if ensure_preview(
+            &mut raw_preview,
+            &env,
+            "Raw View",
+            &dummy,
+            Some(RAW_WINDOW_POS),
+        )
+        .is_err()
+        {
+            raw_enabled = false;
+        }
+    }
+    if let Some(preview) = raw_preview.as_mut() {
+        preview.raise();
+        thread::sleep(Duration::from_millis(50));
+    }
+    if processed_enabled {
+        let dummy = FramePacket {
+            width: 640,
+            height: 480,
+            stride: 640,
+            format: ColorFormat::Gray,
+            payload: FramePayload::Owned(vec![0; (640 * 480) as usize]),
+        };
+        if ensure_preview(
+            &mut processed_preview,
+            &env,
+            "Processed View",
+            &dummy,
+            Some(PROCESSED_WINDOW_POS),
+        )
+        .is_err()
+        {
+            processed_enabled = false;
+        }
+    }
+    if let Some(preview) = processed_preview.as_mut() {
+        preview.raise();
+        thread::sleep(Duration::from_millis(50));
+    }
+    if birds_enabled {
+        let dummy = FramePacket {
+            width: 640,
+            height: 480,
+            stride: 640,
+            format: ColorFormat::Gray,
+            payload: FramePayload::Owned(vec![0; (640 * 480) as usize]),
+        };
+        if ensure_preview(
+            &mut birds_eye_preview,
+            &env,
+            "Bird's Eye View",
+            &dummy,
+            Some(BIRD_WINDOW_POS),
+        )
+        .is_err()
+        {
+            birds_enabled = false;
+        }
+    }
+    if let Some(preview) = birds_eye_preview.as_mut() {
+        preview.raise();
+        thread::sleep(Duration::from_millis(50));
+    }
+    if let Some(preview) = raw_preview.as_mut() {
+        preview.raise();
+    }
+
+    while running {
+        match rx.recv_timeout(Duration::from_millis(16)) {
+            Ok(msg) => {
+                update_pending_messages(
+                    msg,
+                    &mut pending_raw,
+                    &mut pending_processed,
+                    &mut pending_bird,
+                );
+                while let Ok(msg) = rx.try_recv() {
+                    update_pending_messages(
+                        msg,
+                        &mut pending_raw,
+                        &mut pending_processed,
+                        &mut pending_bird,
+                    );
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+
+        let now = Instant::now();
+        let frame_interval = Duration::from_millis(66);
+        let should_present = now.duration_since(last_present) >= frame_interval;
+
+        if should_present {
+            if raw_enabled {
+                if let Some(packet) = pending_raw.take() {
+                    if ensure_preview(
+                        &mut raw_preview,
+                        &env,
+                        "Raw View",
+                        &packet,
+                        Some(RAW_WINDOW_POS),
+                    )
+                    .is_ok()
+                    {
+                        present_packet(raw_preview.as_mut(), &packet, true);
+                    }
+                }
+            } else {
+                raw_preview = None;
+            }
+
+            if processed_enabled {
+                if let Some(packet) = pending_processed.take() {
+                    if ensure_preview(
+                        &mut processed_preview,
+                        &env,
+                        "Processed View",
+                        &packet,
+                        Some(PROCESSED_WINDOW_POS),
+                    )
+                    .is_ok()
+                    {
+                        present_packet(processed_preview.as_mut(), &packet, false);
+                    }
+                }
+            } else {
+                processed_preview = None;
+            }
+
+            if birds_enabled {
+                if let Some(packet) = pending_bird.take() {
+                    if ensure_preview(
+                        &mut birds_eye_preview,
+                        &env,
+                        "Bird's Eye View",
+                        &packet,
+                        Some(BIRD_WINDOW_POS),
+                    )
+                    .is_ok()
+                    {
+                        present_packet(birds_eye_preview.as_mut(), &packet, false);
+                    }
+                }
+            } else {
+                birds_eye_preview = None;
+            }
+
+            if raw_enabled || processed_enabled || birds_enabled {
+                last_present = now;
+            }
+        }
+
+        for event in env.event_pump.poll_iter() {
+            match event {
+                Event::Quit { .. }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => {
+                    let _ = event_tx.send(PreviewEvent::Quit);
+                    running = false;
+                    break;
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::R),
+                    ..
+                } => {
+                    raw_enabled = !raw_enabled;
+                    raw_preview = None;
+                    println!(
+                        "[GUI] Raw preview {}",
+                        if raw_enabled { "enabled" } else { "disabled" }
+                    );
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::P),
+                    ..
+                } => {
+                    processed_enabled = !processed_enabled;
+                    processed_preview = None;
+                    println!(
+                        "[GUI] Processed preview {}",
+                        if processed_enabled {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    );
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::B),
+                    ..
+                } => {
+                    birds_enabled = !birds_enabled;
+                    birds_eye_preview = None;
+                    println!(
+                        "[GUI] Bird's eye preview {}",
+                        if birds_enabled { "enabled" } else { "disabled" }
+                    );
+                }
+                Event::Window {
+                    win_event: WindowEvent::Close,
+                    window_id,
+                    ..
+                } => {
+                    if raw_preview.as_ref().map(|p| p.window_id()) == Some(window_id) {
+                        raw_preview = None;
+                        raw_enabled = false;
+                        println!("[GUI] Raw preview window closed");
+                    } else if processed_preview.as_ref().map(|p| p.window_id()) == Some(window_id) {
+                        processed_preview = None;
+                        processed_enabled = false;
+                        println!("[GUI] Processed preview window closed");
+                    } else if birds_eye_preview.as_ref().map(|p| p.window_id()) == Some(window_id) {
+                        birds_eye_preview = None;
+                        birds_enabled = false;
+                        println!("[GUI] Bird's eye preview window closed");
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn update_pending_messages(
+    msg: PreviewMessage,
+    pending_raw: &mut Option<FramePacket>,
+    pending_processed: &mut Option<FramePacket>,
+    pending_bird: &mut Option<FramePacket>,
+) {
+    match msg {
+        PreviewMessage::Raw(frame) => *pending_raw = Some(frame),
+        PreviewMessage::Processed(frame) => *pending_processed = Some(frame),
+        PreviewMessage::Bird(frame) => *pending_bird = Some(frame),
+    }
+}
+
+fn ensure_preview(
+    target: &mut Option<SdlPreview>,
+    env: &SdlEnv,
+    title: &str,
+    frame: &FramePacket,
+    position: Option<(i32, i32)>,
+) -> opencv::Result<()> {
+    if target.is_none() {
+        let preview = SdlPreview::new(
+            &env.video,
+            title,
+            frame.width,
+            frame.height,
+            frame.format,
+            position,
+        )?;
+        *target = Some(preview);
+    }
+    Ok(())
+}
+
+fn present_packet(preview: Option<&mut SdlPreview>, packet: &FramePacket, is_raw: bool) {
+    if let Some(preview) = preview {
+        match &packet.payload {
+            FramePayload::Camera(buffer) => {
+                if let Err(err) = preview.present(
+                    packet.width,
+                    packet.height,
+                    packet.format,
+                    buffer.as_slice(),
+                    packet.stride,
+                ) {
+                    eprintln!("[GUI] Failed to present frame: {}", err);
+                }
+            }
+            FramePayload::Mat(mat) => {
+                if let Err(err) = render_resized_mat(preview, mat.as_ref(), packet.format, is_raw) {
+                    eprintln!("[GUI] Failed to present frame: {}", err);
+                }
+            }
+            FramePayload::Owned(data) => {
+                let stride = if packet.format == ColorFormat::Gray {
+                    packet.width as usize
+                } else {
+                    packet.width as usize * 3
+                };
+                if let Err(err) =
+                    preview.present(packet.width, packet.height, packet.format, data, stride)
+                {
+                    eprintln!("[GUI] Failed to present frame: {}", err);
+                }
+            }
+        }
+    }
+}
+
+fn render_resized_mat(
+    preview: &mut SdlPreview,
+    mat: &Mat,
+    format: ColorFormat,
+    is_raw: bool,
+) -> opencv::Result<()> {
+    let target_size = if is_raw {
+        Size::new(320, 240)
+    } else {
+        Size::new(320, 240)
+    };
+    let mut resized = Mat::default();
+    imgproc::resize(mat, &mut resized, target_size, 0.0, 0.0, imgproc::INTER_LINEAR)?;
+    let data = resized.data_bytes()?;
+    let stride = if format == ColorFormat::Gray {
+        target_size.width as usize
+    } else {
+        target_size.width as usize * 3
+    };
+    preview.present(
+        target_size.width as u32,
+        target_size.height as u32,
+        format,
+        data,
+        stride,
+    )
+}

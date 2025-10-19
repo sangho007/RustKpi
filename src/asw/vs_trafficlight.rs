@@ -1,22 +1,23 @@
 use crate::asw::lib::vs_trafficlight_lib::*;
+use crate::calibration::traffic_light::TrafficLightCalibration;
 use crate::rte::rte_dto::DtoTrafficLight;
 use crate::rte::rte_main::CameraChannels;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::RecvError;
 
-const TRAFFIC_DETECTION_INTERVAL: u32 = 5;
-
 pub async fn runnable_trafficlight_detection(
     id: &'static str,
     camera: CameraChannels,
 ) -> opencv::Result<()> {
+    let traffic_calibration = TrafficLightCalibration::default();
+    let detection_interval = traffic_calibration.detection_interval;
     let raw_tx = camera.raw_tx.clone();
     let traffic_tx = camera.traffic_light_tx.clone();
     let join_result = tokio::task::spawn_blocking(move || -> opencv::Result<()> {
         let mut rx = raw_tx.subscribe();
         let mut alive_cnt = 0;
-        let mut pipeline = Pipeline::new();
+        let mut pipeline = Pipeline::new(traffic_calibration);
         let mut last_lag_log: Option<Instant> = None;
         let mut last_detected_color = TrafficLightColor::Off;
 
@@ -41,7 +42,7 @@ pub async fn runnable_trafficlight_detection(
                 cam_raw = newer;
             }
 
-            let should_detect = (alive_cnt % TRAFFIC_DETECTION_INTERVAL == 0)
+            let should_detect = (alive_cnt % detection_interval == 0)
                 || matches!(last_detected_color, TrafficLightColor::Off);
             if should_detect {
                 let bgr_mat = cam_raw.as_bgr_mat()?;
