@@ -8,13 +8,15 @@ use opencv::{Result, videoio};
 use std::path::Path;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::task;
 
 const CAPTURE_QUEUE_DEPTH: usize = 3;
 const LIBCAM_WIDTH: u32 = 640;
 const LIBCAM_HEIGHT: u32 = 480;
+const TARGET_FPS: u64 = 30;
+const FRAME_INTERVAL_NS: u64 = 1_000_000_000 / TARGET_FPS;
 
 /// Spawn the camera provider tasks and shuttle frames into the raw RTE channel.
 pub async fn ea_cam_provider(camera: CameraChannels) -> Result<()> {
@@ -72,6 +74,8 @@ pub async fn ea_cam_provider(camera: CameraChannels) -> Result<()> {
 /// initialise the selected capture backend and pushes frames onto the channel
 /// until the receiver goes away.
 fn camera_capture_loop(frame_tx: mpsc::Sender<cam_lib::CapturedFrame>) -> Result<()> {
+    let mut last_frame_sent: Option<Instant> = None;
+    let frame_interval = Duration::from_nanos(FRAME_INTERVAL_NS);
     // 계속해서 캡처 백엔드를 재초기화해 스트림 끊김에 대응한다.
     loop {
         let mut cap = match init_capture() {
@@ -89,9 +93,16 @@ fn camera_capture_loop(frame_tx: mpsc::Sender<cam_lib::CapturedFrame>) -> Result
         loop {
             match cap.read_frame() {
                 Ok(Some(captured)) => {
+                    if let Some(last) = last_frame_sent {
+                        let elapsed = last.elapsed();
+                        if elapsed < frame_interval {
+                            thread::sleep(frame_interval - elapsed);
+                        }
+                    }
                     if frame_tx.blocking_send(captured).is_err() {
                         return Ok(());
                     }
+                    last_frame_sent = Some(Instant::now());
                 }
                 Ok(None) => {
                     println!("[bsw] 비디오 스트림 종료. 재시도합니다.");
