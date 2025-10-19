@@ -268,6 +268,43 @@ fn run_preview_thread(
     let mut pending_processed: Option<FramePacket> = None;
     let mut pending_bird: Option<FramePacket> = None;
 
+    if raw_enabled {
+        let dummy = FramePacket {
+            width: 640,
+            height: 480,
+            stride: 640 * 3,
+            format: ColorFormat::Bgr,
+            data: vec![0; (640 * 480 * 3) as usize],
+        };
+        if ensure_preview(&mut raw_preview, &env, "Raw View", &dummy).is_err() {
+            raw_enabled = false;
+        }
+    }
+    if processed_enabled {
+        let dummy = FramePacket {
+            width: 640,
+            height: 480,
+            stride: 640,
+            format: ColorFormat::Gray,
+            data: vec![0; (640 * 480) as usize],
+        };
+        if ensure_preview(&mut processed_preview, &env, "Processed View", &dummy).is_err() {
+            processed_enabled = false;
+        }
+    }
+    if birds_enabled {
+        let dummy = FramePacket {
+            width: 640,
+            height: 480,
+            stride: 640,
+            format: ColorFormat::Gray,
+            data: vec![0; (640 * 480) as usize],
+        };
+        if ensure_preview(&mut birds_eye_preview, &env, "Bird's Eye View", &dummy).is_err() {
+            birds_enabled = false;
+        }
+    }
+
     while running {
         match rx.recv_timeout(Duration::from_millis(16)) {
             Ok(msg) => {
