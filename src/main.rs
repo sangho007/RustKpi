@@ -15,7 +15,7 @@ use opencv::core::Mat;
 use opencv::prelude::{MatTraitConst, MatTraitConstManual};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::Duration;
 use tokio::{select, sync::broadcast::error::RecvError};
@@ -37,7 +37,13 @@ struct FramePacket {
     height: u32,
     stride: usize,
     format: ColorFormat,
-    data: Vec<u8>,
+    payload: FramePayload,
+}
+
+enum FramePayload {
+    Camera(Arc<CameraBuffer>),
+    Mat(Arc<Mat>),
+    Owned(Vec<u8>),
 }
 
 enum PreviewMessage {
@@ -120,7 +126,7 @@ async fn main() -> opencv::Result<()> {
                             height: newest.height,
                             stride: newest.stride,
                             format: newest.color_format,
-                            data: newest.buffer.as_slice().to_vec(),
+                            payload: FramePayload::Camera(newest.buffer.clone()),
                         };
                         let _ = tx.send(PreviewMessage::Raw(payload));
                     }
@@ -140,21 +146,20 @@ async fn main() -> opencv::Result<()> {
                         newest = newer;
                     }
                     if let Some(tx) = preview_tx.as_ref() {
-                        let mat = newest.img.as_ref();
-                        match (mat.data_bytes(), mat.step1(0)) {
-                            (Ok(data), Ok(stride)) => {
-                                let format = mat_color_format(mat);
+                        let mat = newest.img.clone();
+                        match mat.as_ref().step1(0) {
+                            Ok(stride) => {
+                                let format = mat_color_format(mat.as_ref());
                                 let payload = FramePacket {
                                     width: newest.width,
                                     height: newest.height,
                                     stride: stride as usize,
                                     format,
-                                    data: data.to_vec(),
+                                    payload: FramePayload::Mat(mat),
                                 };
                                 let _ = tx.send(PreviewMessage::Processed(payload));
                             }
-                            (Err(err), _) => eprintln!("[GUI] Failed to read processed data: {}", err),
-                            (_, Err(err)) => eprintln!("[GUI] Failed to read processed stride: {}", err),
+                            Err(err) => eprintln!("[GUI] Failed to read processed stride: {}", err),
                         }
                     }
                 }
@@ -173,21 +178,20 @@ async fn main() -> opencv::Result<()> {
                         newest = newer;
                     }
                     if let Some(tx) = preview_tx.as_ref() {
-                        let mat = newest.img.as_ref();
-                        match (mat.data_bytes(), mat.step1(0)) {
-                            (Ok(data), Ok(stride)) => {
-                                let format = mat_color_format(mat);
+                        let mat = newest.img.clone();
+                        match mat.as_ref().step1(0) {
+                            Ok(stride) => {
+                                let format = mat_color_format(mat.as_ref());
                                 let payload = FramePacket {
                                     width: newest.width,
                                     height: newest.height,
                                     stride: stride as usize,
                                     format,
-                                    data: data.to_vec(),
+                                    payload: FramePayload::Mat(mat),
                                 };
                                 let _ = tx.send(PreviewMessage::Bird(payload));
                             }
-                            (Err(err), _) => eprintln!("[GUI] Failed to read bird-eye data: {}", err),
-                            (_, Err(err)) => eprintln!("[GUI] Failed to read bird-eye stride: {}", err),
+                            Err(err) => eprintln!("[GUI] Failed to read bird-eye stride: {}", err),
                         }
                     }
                 }
@@ -274,7 +278,7 @@ fn run_preview_thread(
             height: 480,
             stride: 640 * 3,
             format: ColorFormat::Bgr,
-            data: vec![0; (640 * 480 * 3) as usize],
+            payload: FramePayload::Owned(vec![0; (640 * 480 * 3) as usize]),
         };
         if ensure_preview(&mut raw_preview, &env, "Raw View", &dummy).is_err() {
             raw_enabled = false;
@@ -286,7 +290,7 @@ fn run_preview_thread(
             height: 480,
             stride: 640,
             format: ColorFormat::Gray,
-            data: vec![0; (640 * 480) as usize],
+            payload: FramePayload::Owned(vec![0; (640 * 480) as usize]),
         };
         if ensure_preview(&mut processed_preview, &env, "Processed View", &dummy).is_err() {
             processed_enabled = false;
@@ -298,7 +302,7 @@ fn run_preview_thread(
             height: 480,
             stride: 640,
             format: ColorFormat::Gray,
-            data: vec![0; (640 * 480) as usize],
+            payload: FramePayload::Owned(vec![0; (640 * 480) as usize]),
         };
         if ensure_preview(&mut birds_eye_preview, &env, "Bird's Eye View", &dummy).is_err() {
             birds_enabled = false;
@@ -461,14 +465,26 @@ fn ensure_preview(
 
 fn present_packet(preview: Option<&mut SdlPreview>, packet: &FramePacket) {
     if let Some(preview) = preview {
-        if let Err(err) = preview.present(
-            packet.width,
-            packet.height,
-            packet.format,
-            &packet.data,
-            packet.stride,
-        ) {
-            eprintln!("[GUI] Failed to present frame: {}", err);
+        let data_result: opencv::Result<&[u8]> = match &packet.payload {
+            FramePayload::Camera(buffer) => Ok(buffer.as_slice()),
+            FramePayload::Mat(mat) => mat.data_bytes(),
+            FramePayload::Owned(data) => Ok(data.as_slice()),
+        };
+        match data_result {
+            Ok(data) => {
+                if let Err(err) = preview.present(
+                    packet.width,
+                    packet.height,
+                    packet.format,
+                    data,
+                    packet.stride,
+                ) {
+                    eprintln!("[GUI] Failed to present frame: {}", err);
+                }
+            }
+            Err(err) => {
+                eprintln!("[GUI] Failed to access frame data: {}", err);
+            }
         }
     }
 }
