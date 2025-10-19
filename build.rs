@@ -10,7 +10,10 @@ fn main() {
     let mut link_libs: Vec<String> = Vec::new();
     let mut link_paths: Vec<PathBuf> = Vec::new();
 
-    if let Ok(lib) = pkg_config::Config::new().cargo_metadata(true).probe("libcamera") {
+    if let Ok(lib) = pkg_config::Config::new()
+        .cargo_metadata(true)
+        .probe("libcamera")
+    {
         include_paths.extend(lib.include_paths.iter().cloned());
         link_libs.extend(lib.libs.iter().cloned());
         link_paths.extend(lib.link_paths.iter().cloned());

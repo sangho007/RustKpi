@@ -131,7 +131,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-get install -y --no-install-recommends \
     llvm-17 llvm-17-dev clang-17 libclang-17-dev \
     # Rust로 C 링킹을 하려면 빌드 도구가 어느 정도 필요
-    build-essential pkg-config vim libwebp-dev python3-dev git \
+    git libsdl2-dev build-essential pkg-config vim libwebp-dev python3-dev git \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. Rust가 LLVM 17을 사용하도록 환경 변수를 설정합니다.

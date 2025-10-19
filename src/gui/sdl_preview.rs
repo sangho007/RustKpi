@@ -1,4 +1,4 @@
-use crate::rte::rte_dto::{ColorFormat, DtoCamRaw};
+use crate::rte::rte_dto::ColorFormat;
 use opencv::Error;
 use opencv::core::StsError;
 use sdl2::event::Event;
@@ -11,6 +11,7 @@ pub struct SdlPreview {
     _sdl: sdl2::Sdl,
     canvas: Canvas<Window>,
     event_pump: sdl2::EventPump,
+    window_title: String,
     frame_width: u32,
     frame_height: u32,
     frame_format: ColorFormat,
@@ -18,12 +19,18 @@ pub struct SdlPreview {
 }
 
 impl SdlPreview {
-    pub fn new(width: u32, height: u32, format: ColorFormat) -> opencv::Result<Self> {
+    pub fn new(
+        title: impl Into<String>,
+        width: u32,
+        height: u32,
+        format: ColorFormat,
+    ) -> opencv::Result<Self> {
         let sdl = sdl2::init().map_err(sdl_err)?;
         let video = sdl.video().map_err(sdl_err)?;
 
+        let title_str = title.into();
         let window = video
-            .window("Raw Preview", width, height)
+            .window(&title_str, width, height)
             .position_centered()
             .resizable()
             .allow_highdpi()
@@ -43,6 +50,7 @@ impl SdlPreview {
             _sdl: sdl,
             canvas,
             event_pump,
+            window_title: title_str,
             frame_width: width,
             frame_height: height,
             frame_format: format,
@@ -50,27 +58,33 @@ impl SdlPreview {
         })
     }
 
-    pub fn present(&mut self, frame: &DtoCamRaw) -> opencv::Result<bool> {
-        if frame.width != self.frame_width || frame.height != self.frame_height {
+    pub fn present(
+        &mut self,
+        width: u32,
+        height: u32,
+        format: ColorFormat,
+        data: &[u8],
+        stride: usize,
+    ) -> opencv::Result<bool> {
+        if width != self.frame_width || height != self.frame_height {
             self.canvas
                 .window_mut()
-                .set_size(frame.width, frame.height)
+                .set_size(width, height)
                 .map_err(sdl_err)?;
-            self.frame_width = frame.width;
-            self.frame_height = frame.height;
+            self.frame_width = width;
+            self.frame_height = height;
         }
 
-        if frame.color_format != self.frame_format {
-            self.frame_format = frame.color_format;
+        if format != self.frame_format {
+            self.frame_format = format;
             self.scratch.clear();
         }
 
         let (pixel_format, needs_gray_expand) = texture_config(self.frame_format);
 
-        let (data, pitch): (&[u8], usize) = if needs_gray_expand {
-            let expected = (frame.width * frame.height) as usize;
-            let source = frame.buffer.as_slice();
-            if source.len() != expected {
+        let (pixels, pitch): (&[u8], usize) = if needs_gray_expand {
+            let expected = (width * height) as usize;
+            if data.len() != expected {
                 return Err(Error::new(
                     StsError,
                     "Unexpected grayscale buffer length for SDL preview",
@@ -79,23 +93,22 @@ impl SdlPreview {
             if self.scratch.len() != expected * 3 {
                 self.scratch.resize(expected * 3, 0);
             }
-            for (i, value) in source.iter().enumerate() {
+            for (i, value) in data.iter().enumerate() {
                 let base = i * 3;
-                let color = *value;
-                self.scratch[base] = color;
-                self.scratch[base + 1] = color;
-                self.scratch[base + 2] = color;
+                self.scratch[base] = *value;
+                self.scratch[base + 1] = *value;
+                self.scratch[base + 2] = *value;
             }
-            (&self.scratch, (frame.width * 3) as usize)
+            (&self.scratch, (width * 3) as usize)
         } else {
-            (frame.buffer.as_slice(), frame.stride)
+            (data, stride)
         };
 
         let texture_creator = self.canvas.texture_creator();
         let mut texture = texture_creator
-            .create_texture_streaming(pixel_format, frame.width, frame.height)
+            .create_texture_streaming(pixel_format, width, height)
             .map_err(sdl_err)?;
-        texture.update(None, data, pitch).map_err(sdl_err)?;
+        texture.update(None, pixels, pitch).map_err(sdl_err)?;
 
         self.canvas.clear();
         self.canvas.copy(&texture, None, None).map_err(sdl_err)?;
@@ -116,6 +129,10 @@ impl SdlPreview {
             }
         }
         false
+    }
+
+    pub fn title(&self) -> &str {
+        &self.window_title
     }
 }
 
