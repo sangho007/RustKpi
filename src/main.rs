@@ -90,5 +90,13 @@ async fn main() -> opencv::Result<()> {
         let _ = handle.await;
     }
 
-    result
+    let exit_code = match result {
+        Ok(_) => 0,
+        Err(err) => {
+            eprintln!("[MAIN] runtime error: {}", err);
+            1
+        }
+    };
+
+    std::process::exit(exit_code);
 }
