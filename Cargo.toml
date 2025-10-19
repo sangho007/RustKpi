@@ -11,8 +11,6 @@ hc-sr04 = "0.1.2"
 linux-embedded-hal = { version = "0.4", features = ["gpio_cdev"] }
 pwm-pca9685 = "1.0.0"
 dbscan = "0.3.1"
-pyo3 = {version = "0.26.0", features = ["auto-initialize"]}
-numpy = "0.26.0"
 sdl2 = "0.36.0"
 
 [build-dependencies]

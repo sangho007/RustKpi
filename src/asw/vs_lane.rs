@@ -1,6 +1,7 @@
 // asw/vision
 
 use crate::asw::lib::vs_lane_lib::*;
+use crate::calibration::LaneCalibration;
 use crate::rte::rte_dto::{ColorFormat, DtoCamBirdEyeView, DtoCamLaneAngle, DtoCamProcessed};
 use crate::rte::rte_main::CameraChannels;
 use opencv::core::Mat;
@@ -10,8 +11,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast::error::RecvError, oneshot};
 
-const PROCESS_INTERVAL: u32 = 3;
-
 pub async fn runnable_pre_processing(
     id: &'static str,
     camera: CameraChannels,
@@ -19,20 +18,24 @@ pub async fn runnable_pre_processing(
     let raw_tx = camera.raw_tx.clone();
     let processed_tx = camera.processed_tx.clone();
     let (done_tx, done_rx) = oneshot::channel();
+    let calibration = LaneCalibration::default();
+    let runtime_calibration = calibration.runtime;
+    let lane_task_config = LaneTaskConfig::new(calibration.processing.kalman.enabled);
+
     thread::Builder::new()
         .name(format!("lane-preprocess-{}", id))
         .spawn(move || {
             let mut rx = raw_tx.subscribe();
             let mut alive_cnt = 0;
 
-            let lane_config = LaneTaskConfig::new(false);
-            let pipeline = match Pipeline::new_with_settings(lane_config.use_kalman) {
+            let pipeline = match Pipeline::new_with_settings(lane_task_config.use_kalman) {
                 Ok(pipeline) => pipeline,
                 Err(err) => {
                     let _ = done_tx.send(Err(err));
                     return;
                 }
             };
+            let process_interval = runtime_calibration.process_interval;
             let mut frame_counter: u32 = 0;
             let mut fps_start = Instant::now();
             let mut last_processed_frame: Option<Arc<Mat>> = None;
@@ -51,9 +54,9 @@ pub async fn runnable_pre_processing(
                     while let Ok(newer) = rx.try_recv() {
                         cam_raw = newer;
                     }
-
-                    let should_process =
-                        (alive_cnt % PROCESS_INTERVAL == 0) || last_processed_frame.is_none();
+                    let should_process = process_interval == 0
+                        || (alive_cnt % process_interval == 0)
+                        || last_processed_frame.is_none();
 
                     let processed_arc: Arc<Mat> = if should_process {
                         let initial_gray = if matches!(cam_raw.color_format, ColorFormat::Gray) {
@@ -128,23 +131,28 @@ pub async fn runnable_get_lane_angle(
     let bird_eye_tx = camera.bird_eye_tx.clone();
     let lane_angle_tx = camera.lane_angle_tx.clone();
     let (done_tx, done_rx) = oneshot::channel();
+    let calibration = LaneCalibration::default();
+    let runtime_calibration = calibration.runtime;
+    let lane_task_config = LaneTaskConfig::new(calibration.processing.kalman.enabled);
+
     thread::Builder::new()
         .name(format!("lane-angle-{}", id))
         .spawn(move || {
             let mut rx = processed_tx.subscribe();
             let mut alive_cnt: u32 = 0;
 
-            let lane_config = LaneTaskConfig::new(false);
-            let mut pipeline = match Pipeline::new_with_settings(lane_config.use_kalman) {
+            let mut pipeline = match Pipeline::new_with_settings(lane_task_config.use_kalman) {
                 Ok(p) => p,
                 Err(err) => {
                     let _ = done_tx.send(Err(err));
                     return;
                 }
             };
-            if lane_config.use_kalman {
-                pipeline.reset_kalman(0.0, 1.0);
+            if lane_task_config.use_kalman {
+                let kalman = calibration.processing.kalman;
+                pipeline.reset_kalman(kalman.initial_estimate, kalman.initial_covariance);
             }
+            let process_interval = runtime_calibration.process_interval;
             let mut frame_counter: u32 = 0;
             let mut fps_start = Instant::now();
             let mut last_birds_eye: Option<Arc<Mat>> = None;
@@ -164,15 +172,22 @@ pub async fn runnable_get_lane_angle(
                     while let Ok(newer) = rx.try_recv() {
                         cam_processed = newer;
                     }
-
-                    let should_process =
-                        (alive_cnt % PROCESS_INTERVAL == 0) || last_birds_eye.is_none();
+                    let should_process = process_interval == 0
+                        || (alive_cnt % process_interval == 0)
+                        || last_birds_eye.is_none();
 
                     let (birds_eye_arc, steering_angle) = if should_process {
                         let roi_img = pipeline.roi(&cam_processed.img)?;
                         let birds_eye_img = pipeline.perspective_transform(&roi_img)?;
+                        let sliding = calibration.processing.sliding;
                         let (_debug, left_fitx, right_fitx, left_detected, right_detected) =
-                            pipeline.sliding_window(&birds_eye_img, 15, 100, 50, true)?;
+                            pipeline.sliding_window(
+                                &birds_eye_img,
+                                sliding.window_count,
+                                sliding.search_margin,
+                                sliding.minpix,
+                                sliding.draw_debug_windows,
+                            )?;
 
                         if !(left_detected || right_detected) {
                             pipeline.left_a.clear();
@@ -190,7 +205,7 @@ pub async fn runnable_get_lane_angle(
                             right_detected,
                         );
 
-                        let steering_angle = if lane_config.use_kalman {
+                        let steering_angle = if lane_task_config.use_kalman {
                             pipeline.update_angle_kalman(detected_angle)
                         } else {
                             detected_angle

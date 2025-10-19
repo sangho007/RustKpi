@@ -2,6 +2,7 @@
 
 mod asw;
 mod bsw;
+mod calibration;
 mod gui;
 mod rte;
 

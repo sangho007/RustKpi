@@ -1,7 +1,8 @@
+use crate::calibration::LaneCalibration;
 use opencv::{
     Result,
     core::AlgorithmHint::ALGO_HINT_DEFAULT,
-    core::{self, CV_8UC1, CV_8UC3, DECOMP_LU, Mat, Point, Point2f, Scalar, Size, UMat, Vector},
+    core::{self, CV_8UC1, CV_8UC3, DECOMP_LU, Mat, Point, Scalar, Size, UMat, Vector},
     highgui, imgproc,
     prelude::*,
     videoio,
@@ -49,6 +50,29 @@ pub struct Pipeline {
 
     /// 슬라이딩 윈도우에서 좌우로 탐색할 여유폭 (margin)
     window_margin: i32,
+
+    /// 가우시안 블러 커널 크기 (가로, 세로)
+    gaussian_kernel: (i32, i32),
+    /// 가우시안 블러 시그마 값 (X, Y)
+    gaussian_sigma: (f64, f64),
+
+    /// 캐니 엣지 하한/상한 임계값
+    canny_low_threshold: f64,
+    canny_high_threshold: f64,
+    /// 캐니 엣지 연산 시 커널 크기
+    canny_aperture_size: i32,
+
+    /// 모폴로지 연산 커널 크기 및 반복 횟수
+    morphology_kernel_size: (i32, i32),
+    morphology_iterations: i32,
+
+    /// 슬라이딩 윈도우 탐색 파라미터
+    sliding_window_count: i32,
+    sliding_window_margin: i32,
+    sliding_window_minpix: i32,
+    sliding_window_draw_debug: bool,
+    lane_points_threshold: usize,
+    search_poly_margin: i32,
 
     /// 관심 영역(ROI)을 정의할 때 사용할 꼭짓점들의 좌표 (4개의 Point)
     vertices: Vec<Point>,
@@ -124,36 +148,22 @@ impl Pipeline {
     /// - `Result`와 `?` 연산자를 통해 에러를 핸들링하며, 예외(exception)가 없어
     ///   제어 흐름이 더 명시적이고 예측 가능합니다.
     pub fn new_with_settings(use_kalman_filter: bool) -> Result<Self> {
-        let width = 1280;
-        let height = 720;
+        let calibration = LaneCalibration::default();
+        let camera = calibration.camera;
+        let image_calibration = calibration.image;
+        let processing = calibration.processing;
 
-        // 슬라이딩 윈도우 탐색용 margin
-        let window_margin = 480;
+        let width = camera.width;
+        let height = camera.height;
+
+        let window_margin = processing.sliding.display_margin;
 
         // ROI(관심영역) 정의를 위한 꼭짓점들(좌하, 좌상, 우상, 우하)
-        let vertices = vec![
-            Point::new(200, height - 100),
-            Point::new(width / 2 - 100, height / 2 + 120),
-            Point::new(width / 2 + 100, height / 2 + 120),
-            Point::new(width - 200, height - 100),
-        ];
+        let vertices = image_calibration.roi.to_points();
 
         // 투시 변환(원근 -> 직사)용 좌표 설정
-        // src(원본) 좌표 4점
-        let points_src = vec![
-            Point2f::new(200.0, (height - 100) as f32),
-            Point2f::new((width / 2 - 100) as f32, (height / 2 + 120) as f32),
-            Point2f::new((width / 2 + 100) as f32, (height / 2 + 120) as f32),
-            Point2f::new((width - 200) as f32, (height - 100) as f32),
-        ];
-
-        // dst(결과) 좌표 4점 (Bird's-eye에서 보정된 위치)
-        let points_dst = vec![
-            Point2f::new(200.0, height as f32),
-            Point2f::new(300.0, 0.0),
-            Point2f::new((width - 300) as f32, 0.0),
-            Point2f::new((width - 200) as f32, height as f32),
-        ];
+        let points_src = image_calibration.perspective.source_points();
+        let points_dst = image_calibration.perspective.destination_points();
 
         // 투시 변환 행렬 (3x3)
         let transform_matrix = imgproc::get_perspective_transform(
@@ -177,15 +187,27 @@ impl Pipeline {
         let rightx_base = rightx_mid;
 
         // 0부터 height-1까지의 y좌표를 저장
-        let mut ploty = Vec::<f64>::with_capacity(height as usize);
-        for i in 0..height {
-            ploty.push(i as f64);
-        }
+        let ploty: Vec<f64> = (0..height).map(|i| i as f64).collect();
+
+        let enabled_kalman = use_kalman_filter && processing.kalman.enabled;
 
         Ok(Self {
             width,
             height,
             window_margin,
+            gaussian_kernel: processing.filtering.gaussian_kernel,
+            gaussian_sigma: processing.filtering.gaussian_sigma,
+            canny_low_threshold: processing.filtering.canny_low_threshold,
+            canny_high_threshold: processing.filtering.canny_high_threshold,
+            canny_aperture_size: processing.filtering.canny_aperture_size,
+            morphology_kernel_size: processing.morphology.kernel_size,
+            morphology_iterations: processing.morphology.iterations,
+            sliding_window_count: processing.sliding.window_count,
+            sliding_window_margin: processing.sliding.search_margin,
+            sliding_window_minpix: processing.sliding.minpix,
+            sliding_window_draw_debug: processing.sliding.draw_debug_windows,
+            lane_points_threshold: processing.sliding.required_points,
+            search_poly_margin: processing.sliding.search_poly_margin,
             vertices,
             transform_matrix,
             inv_transform_matrix,
@@ -204,11 +226,11 @@ impl Pipeline {
             steering_angle: 0.0,
             visible: true,
             exit_flag: false,
-            kalman_estimate: 0.0,
-            kalman_covariance: 1.0,
-            kalman_process_noise: 0.01,
-            kalman_measurement_noise: 0.5,
-            use_kalman_filter,
+            kalman_estimate: processing.kalman.initial_estimate,
+            kalman_covariance: processing.kalman.initial_covariance,
+            kalman_process_noise: processing.kalman.process_noise,
+            kalman_measurement_noise: processing.kalman.measurement_noise,
+            use_kalman_filter: enabled_kalman,
         })
     }
 
@@ -277,12 +299,13 @@ impl Pipeline {
     /// - `?`를 통해 에러가 자동 전파되므로, 각 단계별 에러 처리를 간결히 표현 가능합니다.
     pub(crate) fn noise_removal(&self, img: &UMat) -> Result<UMat> {
         let mut dst = UMat::new_def();
+        let kernel = Size::new(self.gaussian_kernel.0, self.gaussian_kernel.1);
         imgproc::gaussian_blur(
             img,
             &mut dst,
-            Size::new(5, 5),
-            0.0,
-            0.0,
+            kernel,
+            self.gaussian_sigma.0,
+            self.gaussian_sigma.1,
             core::BORDER_DEFAULT,
             ALGO_HINT_DEFAULT,
         )?;
@@ -298,7 +321,14 @@ impl Pipeline {
     /// * 엣지를 나타내는 이진(0/255) 영상
     pub(crate) fn edge_detection(&self, img: &UMat) -> Result<UMat> {
         let mut edges = UMat::new_def();
-        imgproc::canny(img, &mut edges, 200.0, 350.0, 3, false)?;
+        imgproc::canny(
+            img,
+            &mut edges,
+            self.canny_low_threshold,
+            self.canny_high_threshold,
+            self.canny_aperture_size,
+            false,
+        )?;
         Ok(edges)
     }
 
@@ -310,7 +340,8 @@ impl Pipeline {
     /// # 반환
     /// * 닫힘(Closing) 처리된 영상
     pub(crate) fn morphology_close(&self, img: &UMat) -> Result<UMat> {
-        let kernel = Mat::ones(3, 3, CV_8UC1)?.to_mat()?;
+        let (rows, cols) = self.morphology_kernel_size;
+        let kernel = Mat::ones(rows, cols, CV_8UC1)?.to_mat()?;
         let mut dst = UMat::new_def();
         imgproc::morphology_ex(
             img,
@@ -318,7 +349,7 @@ impl Pipeline {
             imgproc::MORPH_CLOSE,
             &kernel,
             Point::new(-1, -1),
-            1,
+            self.morphology_iterations,
             core::BORDER_CONSTANT,
             Scalar::default(),
         )?;
@@ -672,8 +703,8 @@ impl Pipeline {
             righty_vals.push(y as f64);
         }
 
-        let left_lane_detected = leftx_vals.len() >= 5000;
-        let right_lane_detected = rightx_vals.len() >= 5000;
+        let left_lane_detected = leftx_vals.len() >= self.lane_points_threshold;
+        let right_lane_detected = rightx_vals.len() >= self.lane_points_threshold;
 
         // -------------------------------------------
         // 6) 2차 곡선 피팅
@@ -910,8 +941,8 @@ impl Pipeline {
             righty_vals.push(y as f64);
         }
 
-        let left_lane_detected = leftx_vals.len() >= 5000;
-        let right_lane_detected = rightx_vals.len() >= 5000;
+        let left_lane_detected = leftx_vals.len() >= self.lane_points_threshold;
+        let right_lane_detected = rightx_vals.len() >= self.lane_points_threshold;
 
         // -------------------------------------------
         // 5) 새로운 2차 곡선 피팅 (현재 프레임 기준)
@@ -1282,7 +1313,8 @@ impl Pipeline {
         if has_previous_detection {
             // [빠른 추적] 이전 기록이 있으면, 그 주변만 빠르게 탐색합니다.
             // println!("✅ 빠른 추적 모드: search_around_poly 실행");
-            let (img, lfx, rfx, l_det, r_det) = self.search_around_poly(&birds_eye, 100)?;
+            let (img, lfx, rfx, l_det, r_det) =
+                self.search_around_poly(&birds_eye, self.search_poly_margin)?;
             println!(
                 "✅ 빠른 추적 실행: Left Pixels = {}, Right Pixels = {}, Left Detected = {}, Right Detected = {}",
                 lfx.len(),
@@ -1311,8 +1343,13 @@ impl Pipeline {
         } else {
             // [전체 탐색] 이전 기록이 없으면, sliding_window로 전체 영역을 탐색합니다.
             // println!("🔍 전체 탐색 모드: sliding_window 실행");
-            let (img, lfx, rfx, l_det, r_det) =
-                self.sliding_window(&birds_eye, 15, 100, 50, true)?;
+            let (img, lfx, rfx, l_det, r_det) = self.sliding_window(
+                &birds_eye,
+                self.sliding_window_count,
+                self.sliding_window_margin,
+                self.sliding_window_minpix,
+                self.sliding_window_draw_debug,
+            )?;
             println!(
                 "🔍 전체 탐색 실행: Left Pixels = {}, Right Pixels = {}, Left Detected = {}, Right Detected = {}",
                 lfx.len(),
