@@ -29,7 +29,7 @@ pub async fn runnable_pre_processing(
 
         loop {
             // 1. 이벤트 수신 및 데이터 준비
-            let cam_raw = match rx.blocking_recv() {
+            let mut cam_raw = match rx.blocking_recv() {
                 Ok(cam_dto) => cam_dto, // 처리할 데이터만 추출
                 Err(RecvError::Lagged(n)) => {
                     eprintln!("[{}] PreProcess lagged by {}", id, n);
@@ -37,6 +37,10 @@ pub async fn runnable_pre_processing(
                 }
                 Err(RecvError::Closed) => break,
             };
+
+            while let Ok(newer) = rx.try_recv() {
+                cam_raw = newer;
+            }
 
             let should_process =
                 (alive_cnt % PROCESS_INTERVAL == 0) || last_processed_frame.is_none();
@@ -116,7 +120,7 @@ pub async fn runnable_get_lane_angle(
         let mut last_angle: f64 = 0.0;
         loop {
             // 1. 이벤트 수신 및 데이터 준비
-            let cam_processed = match rx.blocking_recv() {
+            let mut cam_processed = match rx.blocking_recv() {
                 Ok(cam_dto) => cam_dto, // 처리할 데이터만 추출
                 Err(RecvError::Lagged(n)) => {
                     eprintln!("[{}] LaneAngle lagged by {}", id, n);
@@ -124,6 +128,10 @@ pub async fn runnable_get_lane_angle(
                 }
                 Err(RecvError::Closed) => break,
             };
+
+            while let Ok(newer) = rx.try_recv() {
+                cam_processed = newer;
+            }
 
             let should_process = (alive_cnt % PROCESS_INTERVAL == 0) || last_birds_eye.is_none();
 

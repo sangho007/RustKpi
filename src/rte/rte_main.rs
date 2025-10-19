@@ -1,6 +1,6 @@
 use crate::rte::rte_dto::{
-    DtoCamBirdEyeView, DtoCamLaneAngle, DtoCamProcessed, DtoCamRaw, DtoDcMotorCtrl,
-    DtoServoCtrl, DtoTrafficLight, DtoUltraSonicObstacle, DtoUltraSonicRaw,
+    DtoCamBirdEyeView, DtoCamLaneAngle, DtoCamProcessed, DtoCamRaw, DtoDcMotorCtrl, DtoServoCtrl,
+    DtoTrafficLight, DtoUltraSonicObstacle, DtoUltraSonicRaw,
 };
 use std::sync::Arc;
 use tokio::sync::broadcast;
