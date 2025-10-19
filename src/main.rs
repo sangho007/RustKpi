@@ -135,6 +135,9 @@ async fn main() -> opencv::Result<()> {
         }
 
         if DEBUG_ON {
+            while let Ok(newer) = camraw_rx.try_recv() {
+                latest_raw_frame = Some(newer);
+            }
             // 2) 블로킹 렌더링을 block_in_place로 감쌈
             let should_quit = task::block_in_place(|| -> opencv::Result<bool> {
                 if let Some(frame) = &latest_raw_frame {
