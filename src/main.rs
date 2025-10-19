@@ -11,13 +11,14 @@ use crate::rte::rte_main::RteSystem;
 use gui::sdl_env::SdlEnv;
 use gui::sdl_preview::SdlPreview;
 use opencv::core;
-use opencv::core::Mat;
+use opencv::core::{Mat, Size};
+use opencv::imgproc;
 use opencv::prelude::{MatTraitConst, MatTraitConstManual};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use std::sync::{Arc, mpsc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::{select, sync::broadcast::error::RecvError};
 
 fn mat_color_format(mat: &Mat) -> ColorFormat {
@@ -271,6 +272,7 @@ fn run_preview_thread(
     let mut pending_raw: Option<FramePacket> = None;
     let mut pending_processed: Option<FramePacket> = None;
     let mut pending_bird: Option<FramePacket> = None;
+    let mut last_present = Instant::now();
 
     if raw_enabled {
         let dummy = FramePacket {
@@ -331,35 +333,48 @@ fn run_preview_thread(
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
 
-        if raw_enabled {
-            if let Some(packet) = pending_raw.take() {
-                if ensure_preview(&mut raw_preview, &env, "Raw View", &packet).is_ok() {
-                    present_packet(raw_preview.as_mut(), &packet);
-                }
-            }
-        } else {
-            raw_preview = None;
-        }
+        let now = Instant::now();
+        let frame_interval = Duration::from_millis(66);
+        let should_present = now.duration_since(last_present) >= frame_interval;
 
-        if processed_enabled {
-            if let Some(packet) = pending_processed.take() {
-                if ensure_preview(&mut processed_preview, &env, "Processed View", &packet).is_ok() {
-                    present_packet(processed_preview.as_mut(), &packet);
+        if should_present {
+            if raw_enabled {
+                if let Some(packet) = pending_raw.take() {
+                    if ensure_preview(&mut raw_preview, &env, "Raw View", &packet).is_ok() {
+                        present_packet(raw_preview.as_mut(), &packet, true);
+                    }
                 }
+            } else {
+                raw_preview = None;
             }
-        } else {
-            processed_preview = None;
-        }
 
-        if birds_enabled {
-            if let Some(packet) = pending_bird.take() {
-                if ensure_preview(&mut birds_eye_preview, &env, "Bird's Eye View", &packet).is_ok()
-                {
-                    present_packet(birds_eye_preview.as_mut(), &packet);
+            if processed_enabled {
+                if let Some(packet) = pending_processed.take() {
+                    if ensure_preview(&mut processed_preview, &env, "Processed View", &packet)
+                        .is_ok()
+                    {
+                        present_packet(processed_preview.as_mut(), &packet, false);
+                    }
                 }
+            } else {
+                processed_preview = None;
             }
-        } else {
-            birds_eye_preview = None;
+
+            if birds_enabled {
+                if let Some(packet) = pending_bird.take() {
+                    if ensure_preview(&mut birds_eye_preview, &env, "Bird's Eye View", &packet)
+                        .is_ok()
+                    {
+                        present_packet(birds_eye_preview.as_mut(), &packet, false);
+                    }
+                }
+            } else {
+                birds_eye_preview = None;
+            }
+
+            if raw_enabled || processed_enabled || birds_enabled {
+                last_present = now;
+            }
         }
 
         for event in env.event_pump.poll_iter() {
@@ -463,28 +478,72 @@ fn ensure_preview(
     Ok(())
 }
 
-fn present_packet(preview: Option<&mut SdlPreview>, packet: &FramePacket) {
+fn present_packet(preview: Option<&mut SdlPreview>, packet: &FramePacket, is_raw: bool) {
     if let Some(preview) = preview {
-        let data_result: opencv::Result<&[u8]> = match &packet.payload {
-            FramePayload::Camera(buffer) => Ok(buffer.as_slice()),
-            FramePayload::Mat(mat) => mat.data_bytes(),
-            FramePayload::Owned(data) => Ok(data.as_slice()),
-        };
-        match data_result {
-            Ok(data) => {
+        match &packet.payload {
+            FramePayload::Camera(buffer) => {
                 if let Err(err) = preview.present(
                     packet.width,
                     packet.height,
                     packet.format,
-                    data,
+                    buffer.as_slice(),
                     packet.stride,
                 ) {
                     eprintln!("[GUI] Failed to present frame: {}", err);
                 }
             }
-            Err(err) => {
-                eprintln!("[GUI] Failed to access frame data: {}", err);
+            FramePayload::Mat(mat) => {
+                if let Err(err) = render_resized_mat(preview, mat.as_ref(), packet.format, is_raw) {
+                    eprintln!("[GUI] Failed to present frame: {}", err);
+                }
+            }
+            FramePayload::Owned(data) => {
+                let stride = if packet.format == ColorFormat::Gray {
+                    packet.width as usize
+                } else {
+                    packet.width as usize * 3
+                };
+                if let Err(err) =
+                    preview.present(packet.width, packet.height, packet.format, data, stride)
+                {
+                    eprintln!("[GUI] Failed to present frame: {}", err);
+                }
             }
         }
     }
+}
+
+fn render_resized_mat(
+    preview: &mut SdlPreview,
+    mat: &Mat,
+    format: ColorFormat,
+    is_raw: bool,
+) -> opencv::Result<()> {
+    let target_size = if is_raw {
+        Size::new(320, 240)
+    } else {
+        Size::new(320, 240)
+    };
+    let mut resized = Mat::default();
+    imgproc::resize(
+        mat,
+        &mut resized,
+        target_size,
+        0.0,
+        0.0,
+        imgproc::INTER_LINEAR,
+    )?;
+    let data = resized.data_bytes()?;
+    let stride = if format == ColorFormat::Gray {
+        target_size.width as usize
+    } else {
+        target_size.width as usize * 3
+    };
+    preview.present(
+        target_size.width as u32,
+        target_size.height as u32,
+        format,
+        data,
+        stride,
+    )
 }
