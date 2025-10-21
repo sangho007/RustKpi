@@ -27,7 +27,7 @@ pub fn device_address() -> u8 {
     calibration().device_address
 }
 
-pub fn servo_channels() -> [Channel; 3] {
+pub fn servo_channels() -> [Channel; 2] {
     calibration().servo_channels
 }
 
