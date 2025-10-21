@@ -28,8 +28,8 @@ impl Default for PwmCalibration {
         Self {
             i2c_bus: "/dev/i2c-1",
             device_address: 0x5f,
-            servo_channels: [Channel::C0, Channel::C1, Channel::C2],
-            servo_default_angles: [90, 180, 170],
+            servo_channels: [Channel::C0, Channel::C2],
+            servo_default_angles: [90, 170],
             motor_m1: MotorChannelCalibration {
                 in1: Channel::C15,
                 in2: Channel::C14,
