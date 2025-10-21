@@ -12,7 +12,7 @@ pub struct PwmCalibration {
     pub i2c_bus: &'static str,
     pub device_address: u8,
     pub servo_channels: [Channel; 2],
-    pub servo_default_angles: [u32; 3],
+    pub servo_default_angles: [u32; 2],
     pub motor_m1: MotorChannelCalibration,
     pub motor_m2: MotorChannelCalibration,
     pub servo_min: u16,
