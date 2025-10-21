@@ -7,7 +7,7 @@ use linux_embedded_hal::I2cdev;
 use std::time::Instant;
 
 use pwm_pca9685::{Address, Pca9685};
-use tokio::{select, sync::broadcast::error::RecvError};
+use tokio::{select, signal, sync::broadcast::error::RecvError};
 
 pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
     let pwm_calibration = PwmCalibration::default();
@@ -74,10 +74,19 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
     let mut last_servo_log = Instant::now();
     let mut last_dc_state: Option<(u32, u32)> = None;
     let mut last_dc_log = Instant::now();
+    let mut ctrl_c_signal = signal::ctrl_c();
+    tokio::pin!(ctrl_c_signal);
 
     // --- 들어오는 명령어를 처리하는 메인 루프 ---
     loop {
         select! {
+            ctrl_c_result = &mut ctrl_c_signal => {
+                match ctrl_c_result {
+                    Ok(()) => println!("[BSW] Ctrl-C 신호 감지, PCA9685 액추에이터를 종료합니다."),
+                    Err(e) => eprintln!("[BSW] Ctrl-C 신호 대기 중 오류: {:?}. 강제 종료합니다.", e),
+                }
+                break;
+            }
             servo_result = servo_rx.recv() => {
                 match servo_result {
                     Ok(servo_dto) => {

@@ -21,7 +21,7 @@ impl Default for AdasLateralCalibration {
             servo_min_deg: 0,
             servo_max_deg: 180,
             servo_channel_index: 0,
-            max_servo_delta_deg: 5,
+            max_servo_delta_deg: 10,
         }
     }
 }
