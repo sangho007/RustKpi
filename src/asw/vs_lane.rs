@@ -188,11 +188,11 @@ pub async fn runnable_get_lane_angle(
 
                     let (birds_eye_arc, steering_angle) = if should_process {
                         let roi_img = pipeline.roi(&cam_processed.img)?;
-                        let birds_eye_img = pipeline.perspective_transform(&roi_img)?;
+                        let birds_eye_binary = pipeline.perspective_transform(&roi_img)?;
                         let sliding = calibration.processing.sliding;
-                        let (_debug, left_fitx, right_fitx, left_detected, right_detected) =
+                        let (birds_eye_visual, left_fitx, right_fitx, left_detected, right_detected) =
                             pipeline.sliding_window(
-                                &birds_eye_img,
+                                &birds_eye_binary,
                                 sliding.window_count,
                                 sliding.search_margin,
                                 sliding.minpix,
@@ -221,7 +221,7 @@ pub async fn runnable_get_lane_angle(
                             detected_angle
                         };
 
-                        let birds_eye_arc = Arc::new(birds_eye_img);
+                        let birds_eye_arc = Arc::new(birds_eye_visual);
                         last_birds_eye = Some(birds_eye_arc.clone());
                         (birds_eye_arc, steering_angle)
                     } else {
