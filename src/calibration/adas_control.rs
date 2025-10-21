@@ -16,7 +16,7 @@ pub struct AdasLateralCalibration {
 impl Default for AdasLateralCalibration {
     fn default() -> Self {
         Self {
-            lane_to_servo_gain: 1.5,
+            lane_to_servo_gain: 5,
             servo_neutral_deg: 90,
             servo_min_deg: 0,
             servo_max_deg: 180,
