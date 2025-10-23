@@ -103,27 +103,6 @@ impl DtoCamBirdEyeView {
 }
 
 #[derive(Debug, Clone)]
-pub enum VfbEvent {
-    // Cam
-    CamRawEvent(Arc<DtoCamRaw>),
-    CamProcessedEvent(Arc<DtoCamProcessed>),
-    CamLaneAngleEvent(Arc<DtoCamLaneAngle>),
-    CamBirdEyeViewEvent(Arc<DtoCamBirdEyeView>),
-    CamTrafficLightEvent(Arc<DtoTrafficLight>),
-    // UltraSonic
-    UltraSonicRawEvent(Arc<DtoUltraSonicRaw>),
-    UltraSonicObstacleDetectedEvent(Arc<DtoUltraSonicObstacle>),
-    // IMU
-    ImuTelemetryEvent(Arc<DtoImu>),
-    // Servo
-    ServoCtrlEvent(Arc<DtoServoCtrl>),
-    // DcMotor
-    DcMotorCtrlEvent(Arc<DtoDcMotorCtrl>),
-    // Tcp
-    TcpTelemetryEvent(Arc<DtoTcpTelemetry>),
-}
-
-#[derive(Debug, Clone)]
 pub struct DtoUltraSonicRaw {
     pub distance: f32,
     pub alive_cnt: u32,

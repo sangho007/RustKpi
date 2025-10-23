@@ -12,6 +12,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
     // 카메라·초음파 채널을 복제해 비동기 작업에서 공유한다.
     let camera_channels = channels.camera.clone();
     let ultrasonic_channels = channels.ultrasonic.clone();
+    let imu_channels = channels.imu.clone();
 
     // 사용자에게 실행 상태를 안내한다.
     println!("== 시스템 실행 중... (GUI 창에서 'q'를 누르면 종료) ==");
@@ -34,6 +35,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
     let mut birds_eye_rx = camera_channels.bird_eye_tx.subscribe();
     let mut lane_angle_rx = camera_channels.lane_angle_tx.subscribe();
     let mut distance_rx = ultrasonic_channels.raw_tx.subscribe();
+    let mut imu_rx = imu_channels.parsed_tx.subscribe();
 
     // Ctrl-C 입력을 감시해 사용자의 종료 요청을 처리한다.
     let ctrl_c = tokio::signal::ctrl_c();
@@ -149,7 +151,8 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
             // 차선 각도 결과를 로그로 출력한다.
             result = lane_angle_rx.recv() => match result {
                 Ok(lane_angle) => {
-                    println!("Angle: {}, alive_cnt: {}", lane_angle.angle, lane_angle.alive_cnt);
+                    //println!("Angle: {}, alive_cnt: {}", lane_angle.angle, lane_angle.alive_cnt);
+                    ;
                 }
                 Err(RecvError::Lagged(n)) => {
                     eprintln!("[MAIN] Lane angle lagged by {}", n);
@@ -170,6 +173,41 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                 }
                 Err(RecvError::Closed) => {
                     eprintln!("[MAIN] Uss angle channel closed.");
+                    break 'main_loop;
+                }
+            },
+
+            // IMU DTO를 출력해 데이터 흐름을 확인한다.
+            result = imu_rx.recv() => match result {
+                Ok(imu) => {
+                    let header = &imu.header;
+                    let pose_position = imu
+                        .pose
+                        .as_ref()
+                        .and_then(|pose| pose.position_world);
+                    let gyro_body = imu
+                        .gyro
+                        .as_ref()
+                        .and_then(|gyro| gyro.body);
+                    println!(
+                        "[IMU] header={{stamp_ns={}, dt_ns={}, seq={}, session_id={:?}, clock_domain={:?}, frame_id={:?}, child_frame_id={:?}}} alive_cnt={} position_world={:?} gyro_body={:?}",
+                        header.stamp_ns,
+                        header.dt_ns,
+                        header.seq,
+                        header.session_id,
+                        header.clock_domain,
+                        header.frame_id,
+                        header.child_frame_id,
+                        imu.alive_cnt,
+                        pose_position,
+                        gyro_body
+                    );
+                }
+                Err(RecvError::Lagged(n)) => {
+                    eprintln!("[MAIN] IMU stream lagged by {}", n);
+                }
+                Err(RecvError::Closed) => {
+                    eprintln!("[MAIN] IMU channel closed.");
                     break 'main_loop;
                 }
             },
