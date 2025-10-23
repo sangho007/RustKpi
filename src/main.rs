@@ -3,9 +3,9 @@
 mod asw;
 mod bsw;
 mod calibration;
-mod util;
-mod rte;
 mod main_runtime;
+mod rte;
+mod util;
 
 use opencv::core;
 
@@ -75,7 +75,9 @@ async fn main() -> opencv::Result<()> {
     {
         let cam = camera_channels.clone();
         tasks.push(tokio::spawn(async move {
-            if let Err(err) = asw::vs_trafficlight::runnable_trafficlight_detection("Traffic", cam).await {
+            if let Err(err) =
+                asw::vs_trafficlight::runnable_trafficlight_detection("Traffic", cam).await
+            {
                 eprintln!("[ASW] Traffic light detection exited with error: {err}");
             }
         }));
@@ -84,7 +86,11 @@ async fn main() -> opencv::Result<()> {
     {
         let ultrasonic = channels.ultrasonic.clone();
         tasks.push(tokio::spawn(async move {
-            asw::forwardcollision_ultrasonic::runnable_obstacle_detection("ForwardCollision", ultrasonic).await;
+            asw::forwardcollision_ultrasonic::runnable_obstacle_detection(
+                "ForwardCollision",
+                ultrasonic,
+            )
+            .await;
         }));
     }
 
@@ -92,7 +98,15 @@ async fn main() -> opencv::Result<()> {
     {
         let chans = channels.clone();
         tasks.push(tokio::spawn(async move {
-            asw::adas_control::runnable_adas_lateral("ADAS-Lateral", chans).await;
+            asw::adas_cod::runnable_adas_lateral("ADAS-Lateral", chans).await;
+        }));
+    }
+
+    // ADAS Longitudinal Control Task
+    {
+        let chans = channels.clone();
+        tasks.push(tokio::spawn(async move {
+            asw::adas_cod::runnable_adas_control_longitudinal("ADAS-Longitudinal", chans).await;
         }));
     }
 

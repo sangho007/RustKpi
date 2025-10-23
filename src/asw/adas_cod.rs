@@ -1,6 +1,11 @@
-use crate::calibration::AdasLateralCalibration;
-use crate::rte::rte_dto::{DtoCamLaneAngle, DtoServoCtrl};
+use crate::asw::lib::vs_trafficlight_lib::TrafficLightColor;
+use crate::calibration::{AdasLateralCalibration, AdasLongitudinalCalibration};
+use crate::rte::rte_dto::{
+    DtoCamLaneAngle, DtoDcMotorCtrl, DtoServoCtrl, DtoTrafficLight, DtoUltraSonicObstacle,
+    DtoUltraSonicRaw,
+};
 use crate::rte::rte_main::RteChannels;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::broadcast::error::TryRecvError;
 use tokio::time;
@@ -44,8 +49,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
         // LaneAngle이 없다면 중립 유지
         let target_deg = if let Some(lane) = latest_lane.as_ref() {
             // 비례 제어: servo = neutral + k * angle
-            let cmd = (calib.servo_neutral_deg as f64
-                + calib.lane_to_servo_gain * lane.angle)
+            let cmd = (calib.servo_neutral_deg as f64 + calib.lane_to_servo_gain * lane.angle)
                 .round() as i32;
             cmd.clamp(calib.servo_min_deg as i32, calib.servo_max_deg as i32) as u32
         } else {
@@ -85,6 +89,124 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
                     id, last_cmd_deg
                 );
             }
+            last_log = Instant::now();
+        }
+    }
+}
+
+/// ADAS Longitudinal 제어 러너블: 장애물·신호등 정보를 기반으로 DC 모터 속도를 결정한다.
+///
+/// - 입력: `ultrasonic.raw_tx`, `ultrasonic.obstacle_tx`, `camera.traffic_light_tx`
+/// - 출력: `control.dc_motor_tx` (`DtoDcMotorCtrl`)
+pub async fn runnable_adas_control_longitudinal(id: &'static str, channels: RteChannels) {
+    let calib = AdasLongitudinalCalibration::default();
+
+    let mut distance_rx = channels.ultrasonic.raw_tx.subscribe();
+    let mut obstacle_rx = channels.ultrasonic.obstacle_tx.subscribe();
+    let mut traffic_rx = channels.camera.traffic_light_tx.subscribe();
+    let dc_tx = channels.control.dc_motor_tx.clone();
+
+    let mut tick = time::interval(calib.control_period);
+
+    let mut latest_distance: Option<DtoUltraSonicRaw> = None;
+    let mut latest_obstacle: Option<DtoUltraSonicObstacle> = None;
+    let mut latest_signal: Option<DtoTrafficLight> = None;
+    let mut last_cmd: Option<(u32, u32)> = None;
+    let mut alive_cnt: u32 = 0;
+    let mut last_log = Instant::now();
+
+    loop {
+        match distance_rx.try_recv() {
+            Ok(dto) => {
+                latest_distance = Some(dto.as_ref().clone());
+                while let Ok(newer) = distance_rx.try_recv() {
+                    latest_distance = Some(newer.as_ref().clone());
+                }
+            }
+            Err(TryRecvError::Lagged(n)) => {
+                eprintln!("[{}] ADAS longitudinal distance lagged by {}", id, n);
+            }
+            Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
+        }
+
+        match obstacle_rx.try_recv() {
+            Ok(dto) => {
+                latest_obstacle = Some(dto.as_ref().clone());
+                while let Ok(newer) = obstacle_rx.try_recv() {
+                    latest_obstacle = Some(newer.as_ref().clone());
+                }
+            }
+            Err(TryRecvError::Lagged(n)) => {
+                eprintln!("[{}] ADAS longitudinal obstacle lagged by {}", id, n);
+            }
+            Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
+        }
+
+        match traffic_rx.try_recv() {
+            Ok(dto) => {
+                latest_signal = Some(dto.as_ref().clone());
+                while let Ok(newer) = traffic_rx.try_recv() {
+                    latest_signal = Some(newer.as_ref().clone());
+                }
+            }
+            Err(TryRecvError::Lagged(n)) => {
+                eprintln!("[{}] ADAS longitudinal traffic lagged by {}", id, n);
+            }
+            Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
+        }
+
+        tick.tick().await;
+
+        let distance_cm = latest_distance.as_ref().map(|d| d.distance);
+        let distance_state = match distance_cm {
+            Some(distance) => (
+                distance <= calib.stop_distance_cm,
+                distance <= calib.slowdown_distance_cm,
+            ),
+            None => (true, true),
+        };
+        let obstacle_detected = latest_obstacle
+            .as_ref()
+            .map(|d| d.detected)
+            .unwrap_or(false);
+        let traffic_color = latest_signal
+            .as_ref()
+            .map(|signal| signal.traffic_light_color.clone());
+
+        let need_stop = obstacle_detected
+            || matches!(traffic_color.as_ref(), Some(TrafficLightColor::Red))
+            || distance_state.0;
+
+        let caution_signal = matches!(
+            traffic_color.as_ref(),
+            Some(TrafficLightColor::Yellow | TrafficLightColor::Off)
+        );
+        let need_caution = caution_signal || distance_state.1;
+
+        let (direction, speed) = if need_stop {
+            (0, 0)
+        } else if need_caution {
+            (1, calib.crawl_speed_percent)
+        } else {
+            (1, calib.cruise_speed_percent)
+        };
+
+        let command = (direction, speed);
+        if last_cmd.map(|prev| prev != command).unwrap_or(true) {
+            let dto = DtoDcMotorCtrl::new(direction, speed, alive_cnt);
+            let _ = dc_tx.send(Arc::new(dto));
+            alive_cnt = alive_cnt.wrapping_add(1);
+            last_cmd = Some(command);
+        }
+
+        if last_log.elapsed() >= calib.log_interval {
+            let distance_str = distance_cm
+                .map(|d| format!("{:.1}", d))
+                .unwrap_or_else(|| "--".to_string());
+            println!(
+                "[{}] Longitudinal: dist={}cm obstacle={} signal={:?} -> dir={} speed={}",
+                id, distance_str, obstacle_detected, traffic_color, direction, speed
+            );
             last_log = Instant::now();
         }
     }

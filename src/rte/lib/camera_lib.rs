@@ -1,4 +1,4 @@
-use opencv::core::{AlgorithmHint, Mat, CV_8UC1, CV_8UC3, CV_8UC4};
+use opencv::core::{AlgorithmHint, CV_8UC1, CV_8UC3, CV_8UC4, Mat};
 use opencv::imgproc;
 use std::ffi::c_void;
 use std::sync::Arc;

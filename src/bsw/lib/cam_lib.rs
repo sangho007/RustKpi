@@ -8,7 +8,7 @@ use crate::calibration::camera::CameraCalibration;
 use crate::rte::rte_dto::{CameraBuffer, ColorFormat};
 use opencv::core::{Mat, Rect, Size};
 use opencv::prelude::{MatTraitConst, MatTraitConstManual, VideoCaptureTrait};
-use opencv::{imgproc, videoio, Result};
+use opencv::{Result, imgproc, videoio};
 use std::sync::Arc;
 
 /// Immutable metadata plus the pixel buffer for a captured frame.
@@ -136,7 +136,7 @@ pub mod libcamera_capture {
     use crate::rte::rte_dto::{BufferRecycler, CameraBuffer, ColorFormat};
     use opencv::{Error, Result};
     use std::cmp;
-    use std::ffi::{c_char, CStr};
+    use std::ffi::{CStr, c_char};
     use std::ptr::NonNull;
     use std::sync::{Arc, Mutex};
 

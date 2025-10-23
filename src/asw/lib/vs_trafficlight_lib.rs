@@ -2,10 +2,10 @@
 use crate::calibration::traffic_light::{TrafficLightCalibration, TrafficLightColorThreshold};
 use dbscan::*;
 use opencv::{
+    Result,
     core::{self, AlgorithmHint::ALGO_HINT_DEFAULT, Mat, Point, Scalar, Size}, // Size 추가
     imgproc,
     prelude::*,
-    Result,
 };
 use std::collections::HashMap;
 

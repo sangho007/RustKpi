@@ -1,10 +1,10 @@
 use crate::rte::rte_dto::ColorFormat;
-use opencv::core::StsError;
 use opencv::Error;
+use opencv::core::StsError;
+use sdl2::VideoSubsystem;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
-use sdl2::VideoSubsystem;
 
 pub struct SdlPreview {
     canvas: Canvas<Window>,

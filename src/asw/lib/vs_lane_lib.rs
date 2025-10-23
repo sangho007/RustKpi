@@ -1,10 +1,11 @@
 use crate::calibration::{LaneCalibration, LaneCalibrationPreset};
 use opencv::{
+    Result,
     core::AlgorithmHint::ALGO_HINT_DEFAULT,
-    core::{self, Mat, Point, Scalar, Size, UMat, Vector, CV_8UC1, CV_8UC3, DECOMP_LU},
+    core::{self, CV_8UC1, CV_8UC3, DECOMP_LU, Mat, Point, Scalar, Size, UMat, Vector},
     highgui, imgproc,
     prelude::*,
-    videoio, Result,
+    videoio,
 };
 use rayon::prelude::*;
 use std::f64::consts::PI;

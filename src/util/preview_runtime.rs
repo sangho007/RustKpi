@@ -6,7 +6,7 @@ use opencv::imgproc;
 use opencv::prelude::MatTraitConstManual;
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
