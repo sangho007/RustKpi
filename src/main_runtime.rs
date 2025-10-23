@@ -1,12 +1,6 @@
-use crate::util::preview_runtime::{
-    self,
-    FramePacket,
-    FramePayload,
-    PreviewEvent,
-    PreviewMessage,
-};
 use crate::rte::rte_dto::*;
 use crate::rte::rte_main::RteChannels;
+use crate::util::preview_runtime::{self, FramePacket, FramePayload, PreviewEvent, PreviewMessage};
 use opencv::core::Mat;
 use opencv::prelude::MatTraitConst;
 use tokio::{select, sync::broadcast::error::RecvError};
@@ -25,7 +19,11 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
     // 디버그 모드에서는 프리뷰 스레드를 띄워 GUI를 활성화한다.
     let (mut preview_tx, mut preview_event_rx, preview_handle) = if DEBUG_ON {
         let runtime = preview_runtime::spawn_preview_thread()?;
-        (Some(runtime.tx), Some(runtime.event_rx), Some(runtime.handle))
+        (
+            Some(runtime.tx),
+            Some(runtime.event_rx),
+            Some(runtime.handle),
+        )
     } else {
         (None, None, None)
     };

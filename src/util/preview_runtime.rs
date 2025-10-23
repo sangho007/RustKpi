@@ -1,6 +1,6 @@
-use crate::util::sdl_env::SdlEnv;
-use crate::util::preview_window::SdlPreview;
 use crate::rte::rte_dto::{CameraBuffer, ColorFormat};
+use crate::util::preview_window::SdlPreview;
+use crate::util::sdl_env::SdlEnv;
 use opencv::core::{Mat, Size};
 use opencv::imgproc;
 use opencv::prelude::MatTraitConstManual;
@@ -408,7 +408,14 @@ fn render_resized_mat(
         Size::new(320, 240)
     };
     let mut resized = Mat::default();
-    imgproc::resize(mat, &mut resized, target_size, 0.0, 0.0, imgproc::INTER_LINEAR)?;
+    imgproc::resize(
+        mat,
+        &mut resized,
+        target_size,
+        0.0,
+        0.0,
+        imgproc::INTER_LINEAR,
+    )?;
     let data = resized.data_bytes()?;
     let stride = if format == ColorFormat::Gray {
         target_size.width as usize

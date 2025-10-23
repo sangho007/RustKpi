@@ -4,8 +4,11 @@ pub mod processing;
 pub mod runtime;
 
 pub use camera::CameraCalibration;
-pub use image::{ImageCalibration, perspective::PerspectiveCalibration, roi::RoiCalibration};
-pub use processing::{ProcessingCalibration, filtering::FilteringCalibration, kalman::KalmanCalibration, morphology::MorphologyCalibration, sliding::SlidingWindowCalibration};
+pub use image::{perspective::PerspectiveCalibration, roi::RoiCalibration, ImageCalibration};
+pub use processing::{
+    filtering::FilteringCalibration, kalman::KalmanCalibration, morphology::MorphologyCalibration,
+    sliding::SlidingWindowCalibration, ProcessingCalibration,
+};
 pub use runtime::LaneRuntimeCalibration;
 
 #[derive(Clone, Copy, Debug)]
@@ -47,8 +50,12 @@ impl LaneCalibration {
 
                 let mut roi_vertices = RoiCalibration::default().vertices;
                 for (x, y) in roi_vertices.iter_mut() {
-                    *x = ((*x as f32) * width_ratio).round().clamp(0.0, camera.width as f32 - 1.0) as i32;
-                    *y = ((*y as f32) * height_ratio).round().clamp(0.0, camera.height as f32 - 1.0) as i32;
+                    *x = ((*x as f32) * width_ratio)
+                        .round()
+                        .clamp(0.0, camera.width as f32 - 1.0) as i32;
+                    *y = ((*y as f32) * height_ratio)
+                        .round()
+                        .clamp(0.0, camera.height as f32 - 1.0) as i32;
                 }
 
                 let mut source = PerspectiveCalibration::default().source;

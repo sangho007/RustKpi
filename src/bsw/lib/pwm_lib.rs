@@ -88,8 +88,8 @@ pub fn percent_to_pwm(percent: u32) -> u16 {
     let clamped_percent = percent.clamp(0, 100);
     let calib = calibration();
     // DC_MIN과 DC_MAX 사이를 선형 보간하여 PWM 값을 계산
-    let pwm_value =
-        calib.dc_min as f64 + (clamped_percent as f64 / 100.0) * (calib.dc_max - calib.dc_min) as f64;
+    let pwm_value = calib.dc_min as f64
+        + (clamped_percent as f64 / 100.0) * (calib.dc_max - calib.dc_min) as f64;
     // 계산된 값이 DC 범위를 벗어나지 않도록 한 번 더 클램프
     let pwm_value = pwm_value.round();
     pwm_value.clamp(calib.dc_min as f64, calib.dc_max as f64) as u16

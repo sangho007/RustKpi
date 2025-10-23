@@ -1,4 +1,4 @@
-use opencv::core::{AlgorithmHint, CV_8UC1, CV_8UC3, CV_8UC4, Mat};
+use opencv::core::{AlgorithmHint, Mat, CV_8UC1, CV_8UC3, CV_8UC4};
 use opencv::imgproc;
 use std::ffi::c_void;
 use std::sync::Arc;
@@ -34,7 +34,6 @@ impl CameraBuffer {
     pub fn as_ptr(&self) -> *const u8 {
         self.data.as_ptr()
     }
-
 }
 
 impl Drop for CameraBuffer {

@@ -190,14 +190,19 @@ pub async fn runnable_get_lane_angle(
                         let roi_img = pipeline.roi(&cam_processed.img)?;
                         let birds_eye_binary = pipeline.perspective_transform(&roi_img)?;
                         let sliding = calibration.processing.sliding;
-                        let (birds_eye_visual, left_fitx, right_fitx, left_detected, right_detected) =
-                            pipeline.sliding_window(
-                                &birds_eye_binary,
-                                sliding.window_count,
-                                sliding.search_margin,
-                                sliding.minpix,
-                                sliding.draw_debug_windows,
-                            )?;
+                        let (
+                            birds_eye_visual,
+                            left_fitx,
+                            right_fitx,
+                            left_detected,
+                            right_detected,
+                        ) = pipeline.sliding_window(
+                            &birds_eye_binary,
+                            sliding.window_count,
+                            sliding.search_margin,
+                            sliding.minpix,
+                            sliding.draw_debug_windows,
+                        )?;
 
                         if !(left_detected || right_detected) {
                             pipeline.left_a.clear();

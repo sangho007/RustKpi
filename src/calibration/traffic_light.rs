@@ -2,12 +2,7 @@ use crate::calibration::camera::CameraCalibration;
 
 const BASE_WIDTH: f32 = 640.0;
 const BASE_HEIGHT: f32 = 480.0;
-const BASE_ROI: [(i32, i32); 4] = [
-    (100, 413),
-    (270, 320),
-    (370, 320),
-    (540, 413),
-];
+const BASE_ROI: [(i32, i32); 4] = [(100, 413), (270, 320), (370, 320), (540, 413)];
 
 #[derive(Clone, Copy, Debug)]
 pub struct TrafficLightColorThreshold {

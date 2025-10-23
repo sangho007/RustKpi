@@ -1,5 +1,5 @@
-use opencv::Error;
 use opencv::core::StsError;
+use opencv::Error;
 
 pub struct SdlEnv {
     _context: sdl2::Sdl,

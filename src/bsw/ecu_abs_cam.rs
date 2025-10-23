@@ -5,7 +5,7 @@ use crate::calibration::camera::CameraCalibration;
 use crate::rte::rte_dto::DtoCamRaw;
 use crate::rte::rte_main::CameraChannels;
 use opencv::prelude::VideoCaptureTrait;
-use opencv::{Result, videoio};
+use opencv::{videoio, Result};
 use std::path::Path;
 use std::sync::Arc;
 use std::thread;
