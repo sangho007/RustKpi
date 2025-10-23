@@ -12,6 +12,7 @@ linux-embedded-hal = { version = "0.4", features = ["gpio_cdev"] }
 pwm-pca9685 = "1.0.0"
 dbscan = "0.3.1"
 sdl2 = "0.36.0"
+prost = "0.13"
 
 [build-dependencies]
 cc = { version = "1.0", features = ["parallel"] }

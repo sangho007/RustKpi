@@ -1,4 +1,5 @@
 pub mod adas_cod;
+pub mod com;
 pub mod forward_collision;
 pub mod lane;
 pub mod pwm;

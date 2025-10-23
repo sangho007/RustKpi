@@ -1,0 +1,252 @@
+use crate::rte::rte_dto::{
+    DtoImu, DtoImuAcceleration, DtoImuGyro, DtoImuHeader, DtoImuPose, DtoImuStatus, DtoImuVelocity,
+};
+use prost::Message;
+
+/// 프로토버퍼 IMU 페이로드를 디코딩해 RTE DTO로 변환한다.
+pub fn decode_imu(payload: &[u8], alive_cnt: u32) -> Result<DtoImu, prost::DecodeError> {
+    let packet = proto::TelemetryMessage::decode(payload)?;
+
+    let header = packet.header.as_ref().map(to_header).unwrap_or_default();
+    let status = packet.status.as_ref().map(to_status);
+    let pose = packet.pose_world_phone.as_ref().map(to_pose);
+    let velocity = packet.velocity.as_ref().map(to_velocity);
+    let acceleration = packet.acceleration.as_ref().map(to_acceleration);
+    let gyro = packet.gyro.as_ref().map(to_gyro);
+
+    Ok(DtoImu::new(
+        header,
+        status,
+        pose,
+        velocity,
+        acceleration,
+        gyro,
+        alive_cnt,
+    ))
+}
+
+fn to_header(raw: &proto::Header) -> DtoImuHeader {
+    DtoImuHeader {
+        stamp_ns: raw.stamp_ns.unwrap_or_default(),
+        dt_ns: raw.dt_ns.unwrap_or_default(),
+        seq: raw.seq.unwrap_or_default(),
+        session_id: normalize_string(raw.session_id.as_ref()),
+        clock_domain: normalize_string(raw.clock_domain.as_ref()),
+        frame_id: normalize_string(raw.frame_id.as_ref()),
+        child_frame_id: normalize_string(raw.child_frame_id.as_ref()),
+    }
+}
+
+fn to_status(raw: &proto::Status) -> DtoImuStatus {
+    DtoImuStatus {
+        tracking: normalize_string(raw.tracking.as_ref()),
+        tracking_confidence: raw.tracking_confidence,
+        num_features: raw.num_features,
+        status_reason: normalize_string(raw.status_reason.as_ref()),
+        flags: raw.flags.clone(),
+    }
+}
+
+fn to_pose(raw: &proto::PoseWorldPhone) -> DtoImuPose {
+    let mut pose = DtoImuPose::default();
+    if let Some(position) = raw.position.as_ref() {
+        pose.position_world = Some(vector3_to_array(position));
+    }
+    if let Some(orientation) = raw.orientation.as_ref() {
+        pose.orientation_quat = Some(quaternion_to_array(orientation));
+    }
+    if let Some(cov) = raw.covariance.as_ref() {
+        pose.position_cov = cov.pos.clone();
+        pose.orientation_cov = cov.ori.clone();
+    }
+    pose.valid = raw.valid;
+    pose
+}
+
+fn to_velocity(raw: &proto::Velocity) -> DtoImuVelocity {
+    let mut velocity = DtoImuVelocity::default();
+    if let Some(world) = raw.world.as_ref() {
+        velocity.world = Some(vector3_to_array(world));
+    }
+    velocity.source = normalize_string(raw.source.as_ref());
+    velocity.covariance = raw.cov.clone();
+    velocity.valid = raw.valid;
+    velocity
+}
+
+fn to_acceleration(raw: &proto::Acceleration) -> DtoImuAcceleration {
+    let mut accel = DtoImuAcceleration::default();
+    if let Some(body) = raw.body_no_gravity.as_ref() {
+        accel.body_no_gravity = Some(vector3_to_array(body));
+    }
+    if let Some(world) = raw.world.as_ref() {
+        accel.world = Some(vector3_to_array(world));
+    }
+    accel.source = normalize_string(raw.source.as_ref());
+    accel.covariance = raw.cov.clone();
+    accel.valid = raw.valid;
+    accel
+}
+
+fn to_gyro(raw: &proto::Gyro) -> DtoImuGyro {
+    let mut gyro = DtoImuGyro::default();
+    if let Some(body) = raw.body.as_ref() {
+        gyro.body = Some(vector3_to_array(body));
+    }
+    gyro.source = normalize_string(raw.source.as_ref());
+    if let Some(bias) = raw.bias.as_ref() {
+        gyro.bias = Some(vector3_to_array(bias));
+    }
+    gyro.covariance = raw.cov.clone();
+    gyro.valid = raw.valid;
+    gyro
+}
+
+fn vector3_to_array(v: &proto::Vector3) -> [f64; 3] {
+    [v.x, v.y, v.z]
+}
+
+fn quaternion_to_array(q: &proto::Quaternion) -> [f64; 4] {
+    [q.x, q.y, q.z, q.w]
+}
+
+fn normalize_string(value: Option<&String>) -> Option<String> {
+    value.and_then(|s| if s.is_empty() { None } else { Some(s.clone()) })
+}
+
+#[allow(clippy::derive_partial_eq_without_eq)]
+pub(self) mod proto {
+    use prost::Message;
+
+    #[derive(Clone, PartialEq, Message)]
+    pub struct TelemetryMessage {
+        #[prost(string, optional, tag = "1")]
+        pub schema_version: Option<String>,
+        #[prost(message, optional, tag = "2")]
+        pub header: Option<Header>,
+        #[prost(message, optional, tag = "3")]
+        pub status: Option<Status>,
+        #[prost(message, optional, tag = "4")]
+        pub pose_world_phone: Option<PoseWorldPhone>,
+        #[prost(message, optional, tag = "5")]
+        pub velocity: Option<Velocity>,
+        #[prost(message, optional, tag = "6")]
+        pub acceleration: Option<Acceleration>,
+        #[prost(message, optional, tag = "7")]
+        pub gyro: Option<Gyro>,
+    }
+
+    #[derive(Clone, PartialEq, Message)]
+    pub struct Header {
+        #[prost(uint64, optional, tag = "1")]
+        pub stamp_ns: Option<u64>,
+        #[prost(uint64, optional, tag = "2")]
+        pub dt_ns: Option<u64>,
+        #[prost(uint64, optional, tag = "3")]
+        pub seq: Option<u64>,
+        #[prost(string, optional, tag = "4")]
+        pub session_id: Option<String>,
+        #[prost(string, optional, tag = "5")]
+        pub clock_domain: Option<String>,
+        #[prost(string, optional, tag = "6")]
+        pub frame_id: Option<String>,
+        #[prost(string, optional, tag = "7")]
+        pub child_frame_id: Option<String>,
+    }
+
+    #[derive(Clone, PartialEq, Message)]
+    pub struct Status {
+        #[prost(string, optional, tag = "1")]
+        pub tracking: Option<String>,
+        #[prost(double, optional, tag = "2")]
+        pub tracking_confidence: Option<f64>,
+        #[prost(uint64, optional, tag = "3")]
+        pub num_features: Option<u64>,
+        #[prost(string, optional, tag = "4")]
+        pub status_reason: Option<String>,
+        #[prost(string, repeated, tag = "5")]
+        pub flags: Vec<String>,
+    }
+
+    #[derive(Clone, PartialEq, Message)]
+    pub struct PoseWorldPhone {
+        #[prost(message, optional, tag = "1")]
+        pub position: Option<Vector3>,
+        #[prost(message, optional, tag = "2")]
+        pub orientation: Option<Quaternion>,
+        #[prost(message, optional, tag = "3")]
+        pub covariance: Option<PoseCovariance>,
+        #[prost(bool, optional, tag = "4")]
+        pub valid: Option<bool>,
+    }
+
+    #[derive(Clone, PartialEq, Message)]
+    pub struct PoseCovariance {
+        #[prost(double, repeated, packed = "true", tag = "1")]
+        pub pos: Vec<f64>,
+        #[prost(double, repeated, packed = "true", tag = "2")]
+        pub ori: Vec<f64>,
+    }
+
+    #[derive(Clone, PartialEq, Message)]
+    pub struct Vector3 {
+        #[prost(double, tag = "1")]
+        pub x: f64,
+        #[prost(double, tag = "2")]
+        pub y: f64,
+        #[prost(double, tag = "3")]
+        pub z: f64,
+    }
+
+    #[derive(Clone, PartialEq, Message)]
+    pub struct Quaternion {
+        #[prost(double, tag = "1")]
+        pub x: f64,
+        #[prost(double, tag = "2")]
+        pub y: f64,
+        #[prost(double, tag = "3")]
+        pub z: f64,
+        #[prost(double, tag = "4")]
+        pub w: f64,
+    }
+
+    #[derive(Clone, PartialEq, Message)]
+    pub struct Velocity {
+        #[prost(message, optional, tag = "1")]
+        pub world: Option<Vector3>,
+        #[prost(string, optional, tag = "2")]
+        pub source: Option<String>,
+        #[prost(double, repeated, packed = "true", tag = "3")]
+        pub cov: Vec<f64>,
+        #[prost(bool, optional, tag = "4")]
+        pub valid: Option<bool>,
+    }
+
+    #[derive(Clone, PartialEq, Message)]
+    pub struct Acceleration {
+        #[prost(message, optional, tag = "1")]
+        pub body_no_gravity: Option<Vector3>,
+        #[prost(message, optional, tag = "2")]
+        pub world: Option<Vector3>,
+        #[prost(string, optional, tag = "3")]
+        pub source: Option<String>,
+        #[prost(double, repeated, packed = "true", tag = "4")]
+        pub cov: Vec<f64>,
+        #[prost(bool, optional, tag = "5")]
+        pub valid: Option<bool>,
+    }
+
+    #[derive(Clone, PartialEq, Message)]
+    pub struct Gyro {
+        #[prost(message, optional, tag = "1")]
+        pub body: Option<Vector3>,
+        #[prost(string, optional, tag = "2")]
+        pub source: Option<String>,
+        #[prost(message, optional, tag = "3")]
+        pub bias: Option<Vector3>,
+        #[prost(double, repeated, packed = "true", tag = "4")]
+        pub cov: Vec<f64>,
+        #[prost(bool, optional, tag = "5")]
+        pub valid: Option<bool>,
+    }
+}

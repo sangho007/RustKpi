@@ -1,6 +1,6 @@
 use crate::rte::rte_dto::{
-    DtoCamBirdEyeView, DtoCamLaneAngle, DtoCamProcessed, DtoCamRaw, DtoDcMotorCtrl, DtoServoCtrl,
-    DtoTrafficLight, DtoUltraSonicObstacle, DtoUltraSonicRaw,
+    DtoCamBirdEyeView, DtoCamLaneAngle, DtoCamProcessed, DtoCamRaw, DtoDcMotorCtrl, DtoImu,
+    DtoServoCtrl, DtoTcpTelemetry, DtoTrafficLight, DtoUltraSonicObstacle, DtoUltraSonicRaw,
 };
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -14,6 +14,8 @@ pub type UltraRawSender = broadcast::Sender<Arc<DtoUltraSonicRaw>>;
 pub type UltraObstacleSender = broadcast::Sender<Arc<DtoUltraSonicObstacle>>;
 pub type ServoCtrlSender = broadcast::Sender<Arc<DtoServoCtrl>>;
 pub type DcMotorCtrlSender = broadcast::Sender<Arc<DtoDcMotorCtrl>>;
+pub type TcpRawSender = broadcast::Sender<Arc<DtoTcpTelemetry>>;
+pub type ImuParsedSender = broadcast::Sender<Arc<DtoImu>>;
 
 const CAM_RAW_CAPACITY: usize = 2;
 const CAM_PROCESSED_CAPACITY: usize = 6;
@@ -24,6 +26,8 @@ const ULTRA_RAW_CAPACITY: usize = 8;
 const ULTRA_OBSTACLE_CAPACITY: usize = 8;
 const SERVO_CTRL_CAPACITY: usize = 16;
 const DC_CTRL_CAPACITY: usize = 16;
+const TCP_RAW_CAPACITY: usize = 16;
+const IMU_PARSED_CAPACITY: usize = 16;
 
 #[derive(Clone)]
 pub struct CameraChannels {
@@ -47,10 +51,23 @@ pub struct ControlChannels {
 }
 
 #[derive(Clone)]
+pub struct TcpChannels {
+    pub telemetry_tx: TcpRawSender,
+}
+
+#[derive(Clone)]
+pub struct ImuChannels {
+    pub raw_tx: TcpRawSender,
+    pub parsed_tx: ImuParsedSender,
+}
+
+#[derive(Clone)]
 pub struct RteChannels {
     pub camera: CameraChannels,
     pub ultrasonic: UltrasonicChannels,
     pub control: ControlChannels,
+    pub com: TcpChannels,
+    pub imu: ImuChannels,
 }
 
 pub struct RteSystem {
@@ -69,6 +86,8 @@ pub fn init() -> RteSystem {
 
     let (servo_ctrl_tx, _) = broadcast::channel(SERVO_CTRL_CAPACITY);
     let (dc_motor_ctrl_tx, _) = broadcast::channel(DC_CTRL_CAPACITY);
+    let (imu_raw_tx, _) = broadcast::channel(TCP_RAW_CAPACITY);
+    let (imu_parsed_tx, _) = broadcast::channel(IMU_PARSED_CAPACITY);
 
     let camera = CameraChannels {
         raw_tx: cam_raw_tx,
@@ -87,12 +106,21 @@ pub fn init() -> RteSystem {
         servo_tx: servo_ctrl_tx,
         dc_motor_tx: dc_motor_ctrl_tx,
     };
+    let com = TcpChannels {
+        telemetry_tx: imu_raw_tx.clone(),
+    };
+    let imu = ImuChannels {
+        raw_tx: imu_raw_tx,
+        parsed_tx: imu_parsed_tx,
+    };
 
     RteSystem {
         channels: RteChannels {
             camera,
             ultrasonic,
             control,
+            com,
+            imu,
         },
     }
 }

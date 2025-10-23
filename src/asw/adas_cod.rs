@@ -98,7 +98,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
 ///
 /// - 입력: `ultrasonic.raw_tx`, `ultrasonic.obstacle_tx`, `camera.traffic_light_tx`
 /// - 출력: `control.dc_motor_tx` (`DtoDcMotorCtrl`)
-pub async fn runnable_adas_control_longitudinal(id: &'static str, channels: RteChannels) {
+pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels) {
     let calib = AdasLongitudinalCalibration::default();
 
     let mut distance_rx = channels.ultrasonic.raw_tx.subscribe();

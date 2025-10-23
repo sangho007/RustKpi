@@ -17,7 +17,7 @@ use tokio::sync::{broadcast::error::RecvError, oneshot};
 
 /// Consume raw camera frames, apply the image pre-processing pipeline and
 /// publish the processed grayscale output for downstream stages.
-pub async fn runnable_pre_processing(
+pub async fn runnable_vs_preprocessing(
     id: &'static str,
     camera: CameraChannels,
 ) -> opencv::Result<()> {
@@ -132,7 +132,7 @@ pub async fn runnable_pre_processing(
 
 /// Consume pre-processed frames, compute the bird's-eye projection and lane
 /// angle, and publish both the visualization and the numeric steering value.
-pub async fn runnable_get_lane_angle(
+pub async fn runnable_vs_get_lane_angle(
     id: &'static str,
     camera: CameraChannels,
 ) -> opencv::Result<()> {

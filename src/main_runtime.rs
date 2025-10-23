@@ -5,7 +5,7 @@ use opencv::core::Mat;
 use opencv::prelude::MatTraitConst;
 use tokio::{select, sync::broadcast::error::RecvError};
 
-const DEBUG_ON: bool = true;
+const DEBUG_ON: bool = false;
 
 /// RTE 채널을 사용하며 프리뷰 GUI와 데이터 스트림을 조율하는 메인 런타임 루프를 수행한다.
 pub async fn run(channels: RteChannels) -> opencv::Result<()> {

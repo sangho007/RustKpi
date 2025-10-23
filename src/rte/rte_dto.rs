@@ -1,6 +1,6 @@
 use crate::asw::lib::vs_trafficlight_lib::TrafficLightColor;
 use crate::rte::lib::camera_lib;
-pub use crate::rte::lib::camera_lib::{BufferRecycler, CameraBuffer, ColorFormat};
+pub use crate::rte::lib::camera_lib::{CameraBuffer, ColorFormat};
 use opencv::core::Mat;
 use std::sync::Arc;
 
@@ -113,10 +113,14 @@ pub enum VfbEvent {
     // UltraSonic
     UltraSonicRawEvent(Arc<DtoUltraSonicRaw>),
     UltraSonicObstacleDetectedEvent(Arc<DtoUltraSonicObstacle>),
+    // IMU
+    ImuTelemetryEvent(Arc<DtoImu>),
     // Servo
     ServoCtrlEvent(Arc<DtoServoCtrl>),
     // DcMotor
     DcMotorCtrlEvent(Arc<DtoDcMotorCtrl>),
+    // Tcp
+    TcpTelemetryEvent(Arc<DtoTcpTelemetry>),
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +177,113 @@ impl DtoUltraSonicObstacle {
     pub fn new(detected: bool, alive_cnt: u32) -> Self {
         Self {
             detected,
+            alive_cnt,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DtoTcpTelemetry {
+    pub payload: Arc<Vec<u8>>,
+    pub message_size: usize,
+    pub alive_cnt: u32,
+}
+
+impl DtoTcpTelemetry {
+    pub fn new(payload: Vec<u8>, alive_cnt: u32) -> Self {
+        let message_size = payload.len();
+        Self {
+            payload: Arc::new(payload),
+            message_size,
+            alive_cnt,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DtoImuHeader {
+    pub stamp_ns: u64,
+    pub dt_ns: u64,
+    pub seq: u64,
+    pub session_id: Option<String>,
+    pub clock_domain: Option<String>,
+    pub frame_id: Option<String>,
+    pub child_frame_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DtoImuStatus {
+    pub tracking: Option<String>,
+    pub tracking_confidence: Option<f64>,
+    pub num_features: Option<u64>,
+    pub status_reason: Option<String>,
+    pub flags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DtoImuPose {
+    pub position_world: Option<[f64; 3]>,
+    pub orientation_quat: Option<[f64; 4]>,
+    pub position_cov: Vec<f64>,
+    pub orientation_cov: Vec<f64>,
+    pub valid: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DtoImuVelocity {
+    pub world: Option<[f64; 3]>,
+    pub source: Option<String>,
+    pub covariance: Vec<f64>,
+    pub valid: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DtoImuAcceleration {
+    pub body_no_gravity: Option<[f64; 3]>,
+    pub world: Option<[f64; 3]>,
+    pub source: Option<String>,
+    pub covariance: Vec<f64>,
+    pub valid: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DtoImuGyro {
+    pub body: Option<[f64; 3]>,
+    pub source: Option<String>,
+    pub bias: Option<[f64; 3]>,
+    pub covariance: Vec<f64>,
+    pub valid: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DtoImu {
+    pub header: DtoImuHeader,
+    pub status: Option<DtoImuStatus>,
+    pub pose: Option<DtoImuPose>,
+    pub velocity: Option<DtoImuVelocity>,
+    pub acceleration: Option<DtoImuAcceleration>,
+    pub gyro: Option<DtoImuGyro>,
+    pub alive_cnt: u32,
+}
+
+impl DtoImu {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        header: DtoImuHeader,
+        status: Option<DtoImuStatus>,
+        pose: Option<DtoImuPose>,
+        velocity: Option<DtoImuVelocity>,
+        acceleration: Option<DtoImuAcceleration>,
+        gyro: Option<DtoImuGyro>,
+        alive_cnt: u32,
+    ) -> Self {
+        Self {
+            header,
+            status,
+            pose,
+            velocity,
+            acceleration,
+            gyro,
             alive_cnt,
         }
     }

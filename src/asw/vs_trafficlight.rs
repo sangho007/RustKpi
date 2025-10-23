@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::RecvError;
 
-pub async fn runnable_trafficlight_detection(
+pub async fn runnable_vs_detect_trafficlight(
     id: &'static str,
     camera: CameraChannels,
 ) -> opencv::Result<()> {

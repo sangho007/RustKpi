@@ -16,7 +16,7 @@ impl Default for CameraCalibration {
             height: 480,
             target_fps: 30,
             capture_queue_depth: 3,
-            use_libcamera: true,
+            use_libcamera: false,
             sample_video_preferred: "./video/challenge_640x480.mp4",
             sample_video_fallback: "./video/challenge.mp4",
         }

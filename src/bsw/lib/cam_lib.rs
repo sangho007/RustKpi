@@ -133,7 +133,7 @@ pub mod libcamera_capture {
     //! Thin wrapper around the C++ libcamera bridge (see `src/bsw/lib/libcamera_bridge.cpp`).
     //! Converts raw buffers into `CapturedFrame` and recycles memory via a pool.
     use super::CapturedFrame;
-    use crate::rte::rte_dto::{BufferRecycler, CameraBuffer, ColorFormat};
+    use crate::rte::lib::camera_lib::{BufferRecycler, CameraBuffer, ColorFormat};
     use opencv::{Error, Result};
     use std::cmp;
     use std::ffi::{CStr, c_char};
