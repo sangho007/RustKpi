@@ -1,3 +1,7 @@
+//! ADAS(Advanced Driver Assistance System) 제어 모듈.
+//! - `runnable_adas_lateral`: 차선 추정 결과를 이용해 조향 서보를 제어한다.
+//! - `runnable_adas_longitudinal`: 장애물과 신호 정보를 사용해 종방향 속도를 결정한다.
+
 use crate::asw::lib::vs_trafficlight_lib::TrafficLightColor;
 use crate::calibration::{AdasLateralCalibration, AdasLongitudinalCalibration};
 use crate::rte::rte_dto::{
@@ -10,10 +14,10 @@ use std::time::Instant;
 use tokio::sync::broadcast::error::TryRecvError;
 use tokio::time;
 
-/// ADAS Lateral 제어 러너블: 차선 각도(laneAngle)에 비례하여 서보 각도를 산출한다.
-///
-/// - 입력: `camera.lane_angle_tx`
-/// - 출력: `control.servo_tx` (`DtoServoCtrl`)
+/// ADAS Lateral 제어 러너블.
+/// - 최신 차선 각도(laneAngle)를 읽어 비례 제어(P 제어)로 서보 목표각을 계산한다.
+/// - 과도한 변화를 막기 위해 `max_servo_delta_deg`만큼 레이트 리밋을 적용한다.
+/// - 결과를 `control.servo_tx` 채널로 퍼블리시한다.
 pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     let calib = AdasLateralCalibration::default();
     let mut lane_rx = channels.camera.lane_angle_tx.subscribe();
@@ -44,6 +48,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             }
         }
 
+        // 제어 주기 동기화
         tick.tick().await;
 
         // LaneAngle이 없다면 중립 유지
@@ -53,10 +58,11 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
                 .round() as i32;
             cmd.clamp(calib.servo_min_deg as i32, calib.servo_max_deg as i32) as u32
         } else {
+            // 데이터가 없으면 조향을 중립 상태로 유지한다.
             calib.servo_neutral_deg
         };
 
-        // 레이트 리밋 적용
+        // 레이트 리밋을 적용해 갑작스러운 조향 변화를 제한한다.
         let delta = if target_deg >= last_cmd_deg {
             target_deg - last_cmd_deg
         } else {
@@ -72,11 +78,12 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             target_deg
         };
 
-        // 명령 송신
+        // 명령 송신: DTO를 Arc로 감싸 브로드캐스트한다.
         let dto = DtoServoCtrl::new(calib.servo_channel_index, limited_deg);
         let _ = servo_tx.send(std::sync::Arc::new(dto));
         last_cmd_deg = limited_deg;
 
+        // 1초마다 현재 제어 상태를 요약해 로깅한다.
         if last_log.elapsed() > std::time::Duration::from_secs(1) {
             if let Some(lane) = latest_lane.as_ref() {
                 println!(
@@ -94,10 +101,10 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     }
 }
 
-/// ADAS Longitudinal 제어 러너블: 장애물·신호등 정보를 기반으로 DC 모터 속도를 결정한다.
-///
-/// - 입력: `ultrasonic.raw_tx`, `ultrasonic.obstacle_tx`, `camera.traffic_light_tx`
-/// - 출력: `control.dc_motor_tx` (`DtoDcMotorCtrl`)
+/// ADAS Longitudinal 제어 러너블.
+/// - 초음파 거리, 장애물 분류, 신호등 색상을 통합해 속도 명령을 생성한다.
+/// - 멈춤/감속/순항 모드를 분기하고, 필요 시 Crawl 속도로 유지한다.
+/// - 결과를 `control.dc_motor_tx` 채널로 브로드캐스트한다.
 pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels) {
     let calib = AdasLongitudinalCalibration::default();
 
@@ -108,6 +115,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
 
     let mut tick = time::interval(calib.control_period);
 
+    // 가장 최근의 센싱 정보를 보관해 제어 주기마다 활용한다.
     let mut latest_distance: Option<DtoUltraSonicRaw> = None;
     let mut latest_obstacle: Option<DtoUltraSonicObstacle> = None;
     let mut latest_signal: Option<DtoTrafficLight> = None;
@@ -116,6 +124,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let mut last_log = Instant::now();
 
     loop {
+        // 초음파 거리 측정값 확인
         match distance_rx.try_recv() {
             Ok(dto) => {
                 latest_distance = Some(dto.as_ref().clone());
@@ -129,6 +138,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
         }
 
+        // 장애물 판별 결과 확인
         match obstacle_rx.try_recv() {
             Ok(dto) => {
                 latest_obstacle = Some(dto.as_ref().clone());
@@ -142,6 +152,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
         }
 
+        // 신호등 인식 결과 확인
         match traffic_rx.try_recv() {
             Ok(dto) => {
                 latest_signal = Some(dto.as_ref().clone());
@@ -157,6 +168,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
 
         tick.tick().await;
 
+        // 가장 최근 거리 값과 임계치 비교
         let distance_cm = latest_distance.as_ref().map(|d| d.distance);
         let distance_state = match distance_cm {
             Some(distance) => (
@@ -173,6 +185,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             .as_ref()
             .map(|signal| signal.traffic_light_color.clone());
 
+        // 장애물·신호·거리 조건을 종합해 정지 여부를 결정한다.
         let need_stop = obstacle_detected
             || matches!(traffic_color.as_ref(), Some(TrafficLightColor::Red))
             || distance_state.0;
@@ -193,12 +206,14 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
 
         let command = (direction, speed);
         if last_cmd.map(|prev| prev != command).unwrap_or(true) {
+            // 명령이 변경되었을 때만 DC 모터 채널로 전송해 불필요한 통신을 줄인다.
             let dto = DtoDcMotorCtrl::new(direction, speed, alive_cnt);
             let _ = dc_tx.send(Arc::new(dto));
             alive_cnt = alive_cnt.wrapping_add(1);
             last_cmd = Some(command);
         }
 
+        // 설정된 로깅 주기에 따라 상태를 출력한다.
         if last_log.elapsed() >= calib.log_interval {
             let distance_str = distance_cm
                 .map(|d| format!("{:.1}", d))

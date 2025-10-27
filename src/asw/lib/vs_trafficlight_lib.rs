@@ -1,4 +1,7 @@
-// 필요한 모듈들을 use 키워드로 가져옵니다.
+//! 신호등 인식 파이프라인 구현.
+//! - HSV 색 공간과 DBSCAN 클러스터링을 이용해 신호등 색상을 안정적으로 판단한다.
+//! - 캘리브레이션 값(ROI, 색상 임계값, 클러스터 파라미터)을 기반으로 동작한다.
+
 use crate::calibration::traffic_light::{TrafficLightCalibration, TrafficLightColorThreshold};
 use dbscan::*;
 use opencv::{
@@ -10,13 +13,17 @@ use opencv::{
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
+/// 신호등의 판별 상태를 표현하는 열거형.
+/// - `Off`는 소등 또는 인식 실패를 의미한다.
 pub enum TrafficLightColor {
     Red,
     Yellow,
     Green,
-    Off, // 소등 상태
+    Off,
 }
 
+/// 신호등 인식 전체 과정을 캡슐화한 파이프라인 구조체.
+/// 캘리브레이션 정보와 내부 임계값, DBSCAN 파라미터를 보관한다.
 pub struct Pipeline {
     vertices: Vec<Point>,
     pub red_threshold: ((u8, u8, u8), (u8, u8, u8)),
@@ -29,6 +36,8 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
+    /// 캘리브레이션 정보를 기반으로 파이프라인을 초기화한다.
+    /// - ROI 정점과 색상 임계값, DBSCAN 파라미터를 내부 상태로 저장한다.
     pub fn new(calibration: TrafficLightCalibration) -> Self {
         let vertices = calibration
             .roi_vertices
@@ -52,6 +61,8 @@ impl Pipeline {
         }
     }
 
+    /// BGR 영상을 HSV 색 공간으로 변환한다.
+    /// - OpenCV `cvt_color`를 사용하며, 파이프라인에서 반복적으로 호출된다.
     pub fn convert_to_hsv(&self, bgr_frame: &Mat) -> Result<Mat> {
         let mut hsv_frame = Mat::default();
         imgproc::cvt_color(
@@ -109,6 +120,7 @@ impl Pipeline {
         detected_color
     }
 
+    /// 지정된 HSV 임계값으로 마스크 이미지를 생성한다.
     fn create_mask(&self, hsv_frame: &Mat, threshold: ((u8, u8, u8), (u8, u8, u8))) -> Result<Mat> {
         let mut mask = Mat::default();
         let (lower, upper) = threshold;
@@ -118,13 +130,8 @@ impl Pipeline {
         Ok(mask)
     }
 
-    /// 모폴로지 열림(Opening) 연산을 적용하여 마스크의 노이즈를 제거합니다.
-    ///
-    /// # Arguments
-    /// * `mask` - 노이즈를 제거할 바이너리 마스크 (`&Mat`)
-    ///
-    /// # Returns
-    /// 노이즈가 제거된 마스크 `Mat`을 포함하는 `Result`를 반환합니다.
+    /// 모폴로지 열림(Opening) 연산을 적용해 마스크 노이즈를 제거한다.
+    /// 인자로 전달된 바이너리 마스크를 변환한 `Mat`을 반환한다.
     fn apply_morphology(&self, mask: &Mat) -> Result<Mat> {
         let mut processed_mask = Mat::default();
         // 연산의 강도를 결정하는 커널(구조 요소) 생성. 크기를 조절하여 효과를 변경할 수 있습니다.
@@ -149,13 +156,8 @@ impl Pipeline {
         Ok(processed_mask)
     }
 
-    /// 마스크 이미지에서 가장 큰 픽셀 클러스터의 크기를 찾습니다.
-    ///
-    /// # Arguments
-    /// * `mask` - DBSCAN 클러스터링을 적용할 바이너리 마스크 (`&Mat`)
-    ///
-    /// # Returns
-    /// 가장 큰 클러스터에 속한 픽셀의 개수(`usize`)를 반환합니다. 클러스터가 없으면 0을 반환합니다.
+    /// 마스크 이미지에서 가장 큰 픽셀 클러스터 크기를 계산한다.
+    /// DBSCAN 결과를 기반으로 핵심/경계 포인트를 모두 카운트하며, 클러스터가 없으면 0을 반환한다.
     fn find_largest_cluster(&self, mask: &Mat) -> usize {
         // 0이 아닌 픽셀의 좌표를 찾습니다.
         let mut points: Vec<[f64; 2]> = Vec::new();
@@ -198,6 +200,7 @@ impl Pipeline {
     }
 }
 
+/// 캘리브레이션 구조체를 `(하한, 상한)` 튜플로 변환한다.
 fn thresholds_to_tuple(threshold: TrafficLightColorThreshold) -> ((u8, u8, u8), (u8, u8, u8)) {
     (threshold.lower, threshold.upper)
 }

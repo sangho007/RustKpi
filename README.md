@@ -28,7 +28,7 @@
 
 | 계층 | 주요 모듈 | 경로 |
 | --- | --- | --- |
-| ASW | `vs_lane`, `vs_trafficlight`, `forwardcollision_ultrasonic`, `adas_cod`, `adas_localization`, `adas_trajectory` | `src/asw/` |
+| ASW | `vs_lane`, `vs_trafficlight`, `forwardcollision_ultrasonic`, `adas_cod`, `adas_localization`, `adas_path_local`, `adas_path_global` | `src/asw/` |
 | RTE | `rte_main`, `rte_dto`, `lib` | `src/rte/` |
 | BSW | `ecu_abs_cam`, `ecu_abs_ultrasonic`, `ecu_abs_pwm`, `ecu_abs_com`, `ecu_abs_imu`, `lib` | `src/bsw/` |
 | Calibration | `lane`, `traffic_light`, `pwm`, `ultrasonic`, `forward_collision`, `com`, `adas_cod` | `src/calibration/` |
@@ -42,7 +42,8 @@ src
 │   │   └── vs_trafficlight_lib.rs
 │   ├── adas_cod.rs
 │   ├── adas_localization.rs
-│   ├── adas_trajectory.rs
+│   ├── adas_path_global.rs
+│   ├── adas_path_local.rs
 │   ├── forwardcollision_ultrasonic.rs
 │   ├── vs_lane.rs
 │   └── vs_trafficlight.rs
@@ -69,6 +70,11 @@ src
 │   ├── rte_dto.rs
 │   ├── rte_main.rs
 │   └── lib
+├── util
+│   ├── mod.rs
+│   ├── preview_runtime.rs
+│   ├── preview_window.rs
+│   └── sdl_env.rs
 ├── main_runtime.rs
 └── main.rs
 
@@ -76,7 +82,6 @@ src
 
 ## AUTOSAR 적용 범위 & VFB 중심 접근
 - VFB: RTE DTO와 Broadcast 채널로 SW 컴포넌트 간 인터페이스를 정형화합니다.
-- 스택 단순화: 실험에 필요한 계층만 사용하고 BSW ECU Abstraction에 집중합니다.
 - BSW: `ecu_abs_cam`, `ecu_abs_ultrasonic`, `ecu_abs_pwm`, `ecu_abs_com`, `ecu_abs_imu`가 센서·액추에이터·텔레메트리를 담당합니다.
 - MCAL: OS 디바이스 드라이버(`libcamera`, `i2cdev`, `pwm_pca9685`)를 대체 활용합니다.
 
@@ -84,8 +89,8 @@ src
 - Vision_LaneFollowing (`src/asw/vs_lane.rs`): 전처리 → 투시 변환 → 슬라이딩 윈도우 → 조향각 계산. 칼만 필터 옵션 및 프레임 스로틀을 지원합니다.
 - Vision_TrafficLight (`src/asw/vs_trafficlight.rs`): HSV + 모폴로지 + DBSCAN으로 신호색을 추정하고 디텍션 간격을 캘리브레이션합니다.
 - UltraSonic_ForwardCollision (`src/asw/forwardcollision_ultrasonic.rs`): 거리 임계값 기반 장애물 이벤트 생성.
-- ADAS Control (`src/asw/adas_cod.rs`): 차선 각도 → 서보 제어(Lateral)와 초음파/신호등/IMU → DC 모터 제어(Longitudinal)를 분리된 러너블로 제공합니다.
-- ADAS Localization / Trajectory (`src/asw/adas_localization.rs`, `src/asw/adas_trajectory.rs`): 향후 경로 계획·센서 융합을 위한 플레이스홀더입니다.
+- ADAS Control (`src/asw/adas_cod.rs`): 차선 각도를 비례 제어 + `max_servo_delta_deg` 레이트 제한으로 서보 명령을 만들고, 초음파/신호등/거리 임계값을 통합한 정지·감속·순항 상태 머신을 구동합니다. 황색·소등 신호나 근접 거리는 감속 모드로 전환합니다.
+- ADAS Localization & Path (`src/asw/adas_localization.rs`, `src/asw/adas_path_local.rs`, `src/asw/adas_path_global.rs`): 글로벌 맵과 로컬 궤적 계획을 위한 플레이스홀더입니다.
 
 
 ### RTE 채널 흐름
@@ -105,7 +110,7 @@ Broadcast 채널을 활용하여 각 Task가 비동기적으로 데이터를 주
 - PCA9685 유틸 (`src/bsw/lib/pwm_lib.rs`): 서보/모터 변환 및 제어 유틸.
 - USB/TCP IMU Gateway (`src/bsw/ecu_abs_com.rs`): iPhone ARKit 텔레메트리를 TCP 길이 프레이밍으로 수신하고 RTE 브로드캐스트로 배포합니다.
 - IMU Protobuf Decoder (`src/bsw/ecu_abs_imu.rs`, `src/bsw/lib/imu_proto.rs`): Swift 앱이 보낸 protobuf payload를 파싱해 `DtoImu`로 변환하고 오일러 각까지 계산합니다.
-- ADAS 제어 러너블 (`src/asw/adas_cod.rs`): 차선 각도 기반 서보 제어(Lateral)와 장애물·신호등·거리 기반 DC 모터 제어(Longitudinal)를 구현합니다.
+- ADAS 제어 러너블 (`src/asw/adas_cod.rs`): 차선 각도를 비례 + 레이트 제한으로 서보에 반영하고, 초음파·신호등·거리 임계값에 따라 정지/감속/순항 상태 머신으로 DC 모터를 제어합니다.
 - 런타임/프리뷰 (`src/main_runtime.rs`, `src/util/preview_*`): SDL2 기반 다중 창 프리뷰(ESC/창 닫기 종료).
 
 ### 카메라 해상도 & 캡처 모드

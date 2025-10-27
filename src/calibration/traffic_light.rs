@@ -1,3 +1,6 @@
+//! 신호등 인식에 필요한 캘리브레이션 값.
+//! ROI 스케일링과 HSV 색상 임계값, 클러스터링 파라미터를 정의한다.
+
 use crate::calibration::camera::CameraCalibration;
 
 const BASE_WIDTH: f32 = 640.0;
@@ -5,12 +8,15 @@ const BASE_HEIGHT: f32 = 480.0;
 const BASE_ROI: [(i32, i32); 4] = [(100, 413), (270, 320), (370, 320), (540, 413)];
 
 #[derive(Clone, Copy, Debug)]
+/// HSV 색 공간에서 특정 색을 선택하기 위한 하한/상한 값.
 pub struct TrafficLightColorThreshold {
     pub lower: (u8, u8, u8),
     pub upper: (u8, u8, u8),
 }
 
 #[derive(Clone, Copy, Debug)]
+/// 신호등 인식 전체 설정.
+/// ROI 좌표와 DBSCAN 파라미터, 색상 임계값을 포함한다.
 pub struct TrafficLightCalibration {
     pub detection_interval: u32,
     pub min_pixel_threshold: usize,

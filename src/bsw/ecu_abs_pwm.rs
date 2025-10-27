@@ -1,4 +1,6 @@
-// 파일명: ecu_abs_pwm
+//! BSW PWM ECU.
+//! PCA9685 보드를 이용해 서보 및 DC 모터를 제어하며, RTE에서 전달된 명령을 실시간으로 적용한다.
+//! 초기화·오류 처리 절차를 명확히 하고, 각 명령 흐름을 로그로 추적한다.
 
 use crate::bsw::lib::pwm_lib::*;
 use crate::calibration::pwm::PwmCalibration;
@@ -9,6 +11,10 @@ use std::time::Instant;
 use pwm_pca9685::{Address, Pca9685};
 use tokio::{select, signal, sync::broadcast::error::RecvError};
 
+/// PCA9685 기반 액추에이터 제어 태스크를 실행한다.
+/// - 서보/모터 채널을 캘리브레이션 정보에 맞춰 초기화한다.
+/// - 브로드캐스트 채널로부터 명령을 구독하여 하드웨어에 즉시 반영한다.
+/// - Ctrl-C 신호가 들어오면 안전하게 장치를 비활성화한다.
 pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
     let pwm_calibration = PwmCalibration::default();
     // --- I2C 및 PCA9685 드라이버 초기화 ---
@@ -66,12 +72,14 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
 
     let mut servo_rx = control.servo_tx.subscribe();
     let mut dc_rx = control.dc_motor_tx.subscribe();
+    // 최근 명령 상태를 유지해 중복 로그를 줄이고, 초기 각도를 보존한다.
     let mut servo_state: Vec<Option<u32>> = pwm_calibration
         .servo_default_angles
         .iter()
         .map(|&angle| Some(angle))
         .collect();
     let mut last_servo_log = Instant::now();
+    // 최근 모터 상태 및 로그 시점을 기록해 불필요한 출력과 진동을 줄인다.
     let mut last_dc_state: Option<(u32, u32)> = None;
     let mut last_dc_log = Instant::now();
     let mut ctrl_c_signal = signal::ctrl_c();
@@ -92,6 +100,7 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
                     Ok(servo_dto) => {
                         if let Some(&target_channel) = pwm_calibration.servo_channels.get(servo_dto.channel as usize) {
                             let pwm_val = angle_to_pwm(servo_dto.angle);
+                            // 서보에 전달되는 듀티비를 직접 설정한다.
                             if let Err(e) = pwm.set_channel_off(target_channel, pwm_val) {
                                 eprintln!("[BSW] 서보 채널 {:?} OFF 값 설정 실패: {:?}", target_channel, e);
                             }
@@ -133,6 +142,7 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
                     Ok(dcmotor_dto) => {
                         match dcmotor_dto.direction {
                             1 => { // 정방향
+                                // 듀얼 모터 모두 동일한 속도로 구동한다.
                                 motor_control(&mut pwm, Motor::M1, Direction::Forward, percent_to_pwm(dcmotor_dto.speed));
                                 motor_control(&mut pwm, Motor::M2, Direction::Forward, percent_to_pwm(dcmotor_dto.speed));
                             },

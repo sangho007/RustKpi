@@ -1,3 +1,7 @@
+//! BSW 초음파 ECU.
+//! HC-SR04 센서에서 주기적으로 거리를 측정해 RTE 채널로 전달하고,
+//! 측정 품질을 추적해 장기적인 상태를 로그로 남긴다.
+
 use crate::bsw::lib::ultrasonic_lib::*;
 use crate::rte::rte_dto::DtoUltraSonicRaw;
 use crate::rte::rte_main::UltrasonicChannels;
@@ -6,9 +10,11 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::time;
 
+/// 초음파 센서에서 거리를 측정해 RTE RAW 채널로 퍼블리시한다.
 pub async fn ea_ultrasonic_provider(channels: UltrasonicChannels) {
     let calibration = ultrasonic_calibration();
     let mut alive_cnt = 0;
+    // 센서 샘플링 간격을 유지하기 위해 Tokio interval을 사용한다.
     let mut interval = time::interval(calibration.sample_interval);
     let UltrasonicChannels { raw_tx, .. } = channels;
 
@@ -28,10 +34,12 @@ pub async fn ea_ultrasonic_provider(channels: UltrasonicChannels) {
     };
 
     let mut last_log = Instant::now();
+    // 일정 시간 동안 정상/범위 초과 측정 횟수를 누적해 품질을 모니터링한다.
     let mut in_range_samples: u32 = 0;
     let mut out_of_range_samples: u32 = 0;
     let mut last_distance: Option<f32> = None;
 
+    // 센서에서 값을 읽어 DTO로 전달하는 메인 루프.
     loop {
         interval.tick().await;
 
@@ -74,6 +82,7 @@ pub async fn ea_ultrasonic_provider(channels: UltrasonicChannels) {
             last_log = Instant::now();
         }
 
+        // 증가하는 카운터는 수신 측에서 누락 여부를 감지하는 데 사용된다.
         alive_cnt += 1;
     }
 }

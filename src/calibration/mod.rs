@@ -1,3 +1,6 @@
+//! 시스템 전반에서 사용하는 캘리브레이션 데이터 모음.
+//! 하드웨어·알고리즘 매개변수를 구조체로 정의하고 기본값을 제공한다.
+
 pub mod adas_cod;
 pub mod com;
 pub mod forward_collision;

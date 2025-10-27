@@ -1,18 +1,26 @@
+//! 카메라 버퍼와 색상 변환을 다루는 RTE 헬퍼 함수 모음.
+//! - 버퍼 재활용을 지원해 고정 길이 메모리를 반복 사용한다.
+//! - 다양한 색상 포맷을 BGR `Mat`으로 통일한다.
+
 use opencv::core::{AlgorithmHint, CV_8UC1, CV_8UC3, CV_8UC4, Mat};
 use opencv::imgproc;
 use std::ffi::c_void;
 use std::sync::Arc;
 
+/// 캡처 버퍼를 재사용하기 위한 콜백 트레이트.
 pub trait BufferRecycler: Send + Sync {
     fn recycle(&self, buffer: Vec<u8>);
 }
 
+/// 카메라 프레임 데이터를 보관하는 버퍼.
+/// 필요한 경우 외부 리사이클러를 통해 메모리를 반납한다.
 pub struct CameraBuffer {
     data: Vec<u8>,
     recycler: Option<Arc<dyn BufferRecycler>>,
 }
 
 impl CameraBuffer {
+    /// 소유권을 가진 Vec에서 직접 버퍼를 생성한다.
     pub fn from_vec(data: Vec<u8>) -> Self {
         Self {
             data,
@@ -20,6 +28,7 @@ impl CameraBuffer {
         }
     }
 
+    /// 재활용기를 연결하여 생성한다.
     pub fn from_vec_with_recycler(data: Vec<u8>, recycler: Arc<dyn BufferRecycler>) -> Self {
         Self {
             data,
@@ -27,10 +36,12 @@ impl CameraBuffer {
         }
     }
 
+    /// 내부 데이터를 슬라이스로 노출한다.
     pub fn as_slice(&self) -> &[u8] {
         &self.data
     }
 
+    /// OpenCV에 전달하기 위한 원시 포인터를 반환한다.
     pub fn as_ptr(&self) -> *const u8 {
         self.data.as_ptr()
     }
@@ -55,6 +66,7 @@ impl std::fmt::Debug for CameraBuffer {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// 지원하는 입력 색상 포맷 목록.
 pub enum ColorFormat {
     Bgr,
     Rgb,
@@ -62,6 +74,7 @@ pub enum ColorFormat {
     Gray,
 }
 
+/// 카메라 버퍼를 OpenCV `Mat`으로 매핑한다(복사 없이).
 pub fn mat_from_buffer(
     buffer: &CameraBuffer,
     width: u32,
@@ -92,6 +105,7 @@ pub fn mat_from_buffer(
     }
 }
 
+/// 다양한 색상 포맷을 BGR `Mat`으로 변환한다.
 pub fn ensure_bgr(mat: &Mat, format: ColorFormat) -> opencv::Result<Mat> {
     match format {
         ColorFormat::Bgr => Ok(mat.clone()),

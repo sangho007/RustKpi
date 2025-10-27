@@ -1,3 +1,7 @@
+//! 차선 검출 파이프라인 구현.
+//! - 영상 전처리, 시점 변환, 슬라이딩 윈도우, 칼만 필터링 등 주요 단계를 포함한다.
+//! - 캘리브레이션 설정을 기반으로 동작해 다양한 해상도와 환경에 대응한다.
+
 use crate::calibration::{LaneCalibration, LaneCalibrationPreset};
 use opencv::{
     Result,

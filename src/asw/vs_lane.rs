@@ -1,6 +1,6 @@
-//! Lane processing tasks: pre-processing raw frames and estimating the lane angle.
-//! The heavy lifting lives in `asw::lib::vs_lane_lib::Pipeline`; this module
-//! wires it up to the RTE channels and applies the configurable calibration set.
+//! 차선 추출 비전 태스크 모음.
+//! - `asw::lib::vs_lane_lib::Pipeline`에서 제공하는 영상 처리 파이프라인을 연결한다.
+//! - RTE 채널과 캘리브레이션 설정을 묶어 전처리/차선 각도 추정 태스크를 구성한다.
 
 // asw/vision
 
@@ -15,8 +15,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast::error::RecvError, oneshot};
 
-/// Consume raw camera frames, apply the image pre-processing pipeline and
-/// publish the processed grayscale output for downstream stages.
+/// 카메라 RAW 프레임을 받아 전처리 파이프라인을 수행한다.
+/// - 색상 변환, 노이즈 제거, 에지 추출, 모폴로지 연산을 순차적으로 적용한다.
+/// - 결과를 회색조 `DtoCamProcessed`로 만들어 후속 단계에서 재사용하도록 브로드캐스트한다.
 pub async fn runnable_vs_preprocessing(
     id: &'static str,
     camera: CameraChannels,
@@ -28,6 +29,7 @@ pub async fn runnable_vs_preprocessing(
     let runtime_calibration = calibration.runtime;
     let lane_task_config = LaneTaskConfig::new(calibration.processing.kalman.enabled);
 
+    // 영상 처리는 OpenCV `Mat`을 많이 다루므로 전용 OS 스레드에서 수행한다.
     thread::Builder::new()
         .name(format!("lane-preprocess-{}", id))
         .spawn(move || {
@@ -60,7 +62,7 @@ pub async fn runnable_vs_preprocessing(
                     while let Ok(newer) = rx.try_recv() {
                         cam_raw = newer;
                     }
-                    // allow calibration to throttle expensive work or keep going every frame
+                    // 캘리브레이션 설정에 따라 프레임을 건너뛰어 CPU 부하를 줄인다.
                     let should_process = process_interval == 0
                         || (alive_cnt % process_interval == 0)
                         || last_processed_frame.is_none();
@@ -73,6 +75,7 @@ pub async fn runnable_vs_preprocessing(
                             let bgr_mat = cam_raw.as_bgr_mat()?;
                             pipeline.gray_scale(&bgr_mat)?
                         };
+                        // 영상 전처리 파이프라인 순서: 노이즈 제거 → 에지 추출 → 모폴로지 폐연산.
                         let blur = pipeline.noise_removal(&initial_gray)?;
                         let edges = pipeline.edge_detection(&blur)?;
                         let closed = pipeline.morphology_close(&edges)?;
@@ -130,8 +133,9 @@ pub async fn runnable_vs_preprocessing(
     }
 }
 
-/// Consume pre-processed frames, compute the bird's-eye projection and lane
-/// angle, and publish both the visualization and the numeric steering value.
+/// 전처리된 영상을 받아 버드아이 뷰와 차선 각도를 계산한다.
+/// - ROI 추출, 투시 변환, 슬라이딩 윈도우 기반 차선 탐색을 수행한다.
+/// - 결과로 생성된 버드아이 시각화와 각도 값을 각각의 RTE 채널에 퍼블리시한다.
 pub async fn runnable_vs_get_lane_angle(
     id: &'static str,
     camera: CameraChannels,
@@ -144,6 +148,7 @@ pub async fn runnable_vs_get_lane_angle(
     let runtime_calibration = calibration.runtime;
     let lane_task_config = LaneTaskConfig::new(calibration.processing.kalman.enabled);
 
+    // 차선 각도 계산 역시 CPU 집약적이므로 전용 스레드에서 처리한다.
     thread::Builder::new()
         .name(format!("lane-angle-{}", id))
         .spawn(move || {
@@ -158,6 +163,7 @@ pub async fn runnable_vs_get_lane_angle(
                 }
             };
             if lane_task_config.use_kalman {
+                // 칼만 필터를 초기화해 연속 프레임 간 노이즈를 줄인다.
                 let kalman = calibration.processing.kalman;
                 pipeline.reset_kalman(kalman.initial_estimate, kalman.initial_covariance);
             }
@@ -181,7 +187,7 @@ pub async fn runnable_vs_get_lane_angle(
                     while let Ok(newer) = rx.try_recv() {
                         cam_processed = newer;
                     }
-                    // reuse cached results when throttled by the calibration interval
+                    // 처리 주기가 제한된 경우 이전 결과를 재사용한다.
                     let should_process = process_interval == 0
                         || (alive_cnt % process_interval == 0)
                         || last_birds_eye.is_none();
@@ -205,6 +211,7 @@ pub async fn runnable_vs_get_lane_angle(
                         )?;
 
                         if !(left_detected || right_detected) {
+                            // 차선을 찾지 못하면 누적 회귀 계수를 초기화한다.
                             pipeline.left_a.clear();
                             pipeline.left_b.clear();
                             pipeline.left_c.clear();
@@ -239,6 +246,7 @@ pub async fn runnable_vs_get_lane_angle(
                     };
                     last_angle = steering_angle;
 
+                    // 차선 각도와 버드아이 영상 결과를 각각 전송한다.
                     let lane_angle_dto = Arc::new(DtoCamLaneAngle::new(steering_angle, alive_cnt));
                     let _ = lane_angle_tx.send(lane_angle_dto);
 

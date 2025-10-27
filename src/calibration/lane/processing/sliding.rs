@@ -1,4 +1,7 @@
+//! 슬라이딩 윈도우 기반 차선 탐색 파라미터.
+
 #[derive(Clone, Copy, Debug)]
+/// 윈도우 개수, 탐색 범위, 디버그 옵션 등을 설정한다.
 pub struct SlidingWindowCalibration {
     pub display_margin: i32,
     pub search_margin: i32,

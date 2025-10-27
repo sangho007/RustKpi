@@ -1,4 +1,7 @@
+//! 영상 전처리(블러, 캐니 엣지) 파라미터.
+
 #[derive(Clone, Copy, Debug)]
+/// 가우시안 블러와 캐니 엣지 설정값.
 pub struct FilteringCalibration {
     pub gaussian_kernel: (i32, i32),
     pub gaussian_sigma: (f64, f64),

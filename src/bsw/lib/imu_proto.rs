@@ -1,9 +1,15 @@
+//! iOS 기반 IMU 텔레메트리 프로토버퍼를 RTE DTO 구조체로 변환하는 유틸리티.
+//! - 하위 필드를 안전하게 파싱하고 누락된 값은 기본값으로 대체한다.
+//! - 좌표계 보정을 위해 쿼터니언을 오일러 각(yaw, roll, pitch)으로 변환한다.
+
 use crate::rte::rte_dto::{
     DtoImu, DtoImuAcceleration, DtoImuGyro, DtoImuHeader, DtoImuPose, DtoImuStatus, DtoImuVelocity,
 };
 use prost::Message;
 
 /// 프로토버퍼 IMU 페이로드를 디코딩해 RTE DTO로 변환한다.
+/// - optional 필드는 `Option`으로 변환하고, 누락된 값은 기본값을 사용한다.
+/// - `alive_cnt`는 상위 계층에서 전달된 패킷 시퀀스 번호를 그대로 복사한다.
 pub fn decode_imu(payload: &[u8], alive_cnt: u32) -> Result<DtoImu, prost::DecodeError> {
     let packet = proto::TelemetryMessage::decode(payload)?;
 
@@ -25,6 +31,7 @@ pub fn decode_imu(payload: &[u8], alive_cnt: u32) -> Result<DtoImu, prost::Decod
     ))
 }
 
+/// 프로토 헤더 메시지를 DTO 헤더로 변환한다.
 fn to_header(raw: &proto::Header) -> DtoImuHeader {
     DtoImuHeader {
         stamp_ns: raw.stamp_ns.unwrap_or_default(),
@@ -37,6 +44,7 @@ fn to_header(raw: &proto::Header) -> DtoImuHeader {
     }
 }
 
+/// 추적 상태 필드를 DTO로 정리한다.
 fn to_status(raw: &proto::Status) -> DtoImuStatus {
     DtoImuStatus {
         tracking: normalize_string(raw.tracking.as_ref()),
@@ -47,6 +55,7 @@ fn to_status(raw: &proto::Status) -> DtoImuStatus {
     }
 }
 
+/// 포즈(위치 및 자세) 정보를 DTO로 변환한다.
 fn to_pose(raw: &proto::PoseWorldPhone) -> DtoImuPose {
     let mut pose = DtoImuPose::default();
     if let Some(position) = raw.position.as_ref() {
@@ -65,6 +74,7 @@ fn to_pose(raw: &proto::PoseWorldPhone) -> DtoImuPose {
     pose
 }
 
+/// 속도 벡터와 공분산을 DTO 포맷으로 매핑한다.
 fn to_velocity(raw: &proto::Velocity) -> DtoImuVelocity {
     let mut velocity = DtoImuVelocity::default();
     if let Some(world) = raw.world.as_ref() {
@@ -76,6 +86,7 @@ fn to_velocity(raw: &proto::Velocity) -> DtoImuVelocity {
     velocity
 }
 
+/// 가속도 측정값을 DTO 구조체에 채운다.
 fn to_acceleration(raw: &proto::Acceleration) -> DtoImuAcceleration {
     let mut accel = DtoImuAcceleration::default();
     if let Some(body) = raw.body_no_gravity.as_ref() {
@@ -90,6 +101,7 @@ fn to_acceleration(raw: &proto::Acceleration) -> DtoImuAcceleration {
     accel
 }
 
+/// 자이로(각속도) 데이터를 DTO로 변환한다.
 fn to_gyro(raw: &proto::Gyro) -> DtoImuGyro {
     let mut gyro = DtoImuGyro::default();
     if let Some(body) = raw.body.as_ref() {
@@ -104,14 +116,18 @@ fn to_gyro(raw: &proto::Gyro) -> DtoImuGyro {
     gyro
 }
 
+/// 프로토콜 벡터를 고정 길이 배열로 변환한다.
 fn vector3_to_array(v: &proto::Vector3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }
 
+/// 프로토콜 쿼터니언을 `[x, y, z, w]` 배열로 변환한다.
 fn quaternion_to_array(q: &proto::Quaternion) -> [f64; 4] {
     [q.x, q.y, q.z, q.w]
 }
 
+/// 쿼터니언을 Yaw-Roll-Pitch 오일러 각으로 변환한다.
+/// - 차량 제어 로직에서는 직관적인 각도 표현이 필요하므로 오일러 각을 병행 제공한다.
 fn quaternion_to_yaw_roll_pitch(quat: &[f64; 4]) -> [f64; 3] {
     let x = quat[0];
     let y = quat[1];
@@ -119,12 +135,14 @@ fn quaternion_to_yaw_roll_pitch(quat: &[f64; 4]) -> [f64; 3] {
     let w = quat[3];
 
     let roll = {
+        // x축 회전(roll)을 계산한다.
         let sinr_cosp = 2.0 * (w * x + y * z);
         let cosr_cosp = 1.0 - 2.0 * (x * x + y * y);
         sinr_cosp.atan2(cosr_cosp)
     };
 
     let pitch = {
+        // y축 회전(pitch)은 아크사인을 사용하며, 특이점에 대비해 값을 제한한다.
         let sinp = 2.0 * (w * y - z * x);
         if sinp.abs() >= 1.0 {
             sinp.signum() * std::f64::consts::FRAC_PI_2
@@ -134,6 +152,7 @@ fn quaternion_to_yaw_roll_pitch(quat: &[f64; 4]) -> [f64; 3] {
     };
 
     let yaw = {
+        // z축 회전(yaw)을 계산한다.
         let siny_cosp = 2.0 * (w * z + x * y);
         let cosy_cosp = 1.0 - 2.0 * (y * y + z * z);
         siny_cosp.atan2(cosy_cosp)
@@ -188,6 +207,7 @@ mod tests {
     }
 }
 
+/// 빈 문자열을 `None`으로 정규화해 불필요한 빈 값을 제거한다.
 fn normalize_string(value: Option<&String>) -> Option<String> {
     value.and_then(|s| if s.is_empty() { None } else { Some(s.clone()) })
 }

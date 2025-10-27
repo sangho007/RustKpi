@@ -1,3 +1,6 @@
+//! SDL 기반 프리뷰 GUI를 백그라운드 스레드에서 실행한다.
+//! 카메라/전처리/Bird-eye 프레임을 수신해 윈도우에 표시하고, 종료 이벤트를 전달한다.
+
 use crate::rte::rte_dto::{CameraBuffer, ColorFormat};
 use crate::util::preview_window::SdlPreview;
 use crate::util::sdl_env::SdlEnv;
@@ -10,12 +13,14 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// 프리뷰 스레드 핸들과 통신 채널을 보관한다.
 pub struct PreviewRuntime {
     pub tx: mpsc::Sender<PreviewMessage>,
     pub event_rx: mpsc::Receiver<PreviewEvent>,
     pub handle: thread::JoinHandle<()>,
 }
 
+/// 프레임 데이터를 전송할 때 사용하는 패킷 구조체.
 pub struct FramePacket {
     pub width: u32,
     pub height: u32,
@@ -24,22 +29,26 @@ pub struct FramePacket {
     pub payload: FramePayload,
 }
 
+/// 프레임 데이터가 저장된 방식.
 pub enum FramePayload {
     Camera(Arc<CameraBuffer>),
     Mat(Arc<Mat>),
     Owned(Vec<u8>),
 }
 
+/// 프리뷰 스레드 입력 메시지 종류.
 pub enum PreviewMessage {
     Raw(FramePacket),
     Processed(FramePacket),
     Bird(FramePacket),
 }
 
+/// 프리뷰 스레드가 메인 루프로 전달하는 이벤트.
 pub enum PreviewEvent {
     Quit,
 }
 
+/// SDL 프리뷰 스레드를 생성하고 통신 채널을 돌려준다.
 pub fn spawn_preview_thread() -> opencv::Result<PreviewRuntime> {
     let (tx, rx) = mpsc::channel::<PreviewMessage>();
     let (event_tx, event_rx) = mpsc::channel::<PreviewEvent>();
@@ -64,6 +73,9 @@ pub fn spawn_preview_thread() -> opencv::Result<PreviewRuntime> {
     })
 }
 
+/// SDL 프리뷰 스레드 본체.
+/// - 수신 큐에서 최신 프레임을 가져와 윈도우에 표시한다.
+/// - 사용자의 키/윈도우 이벤트를 처리해 종료 여부를 판단한다.
 fn run_preview_thread(
     rx: mpsc::Receiver<PreviewMessage>,
     event_tx: mpsc::Sender<PreviewEvent>,
@@ -327,6 +339,7 @@ fn run_preview_thread(
     Ok(())
 }
 
+/// 수신된 메시지를 최신 패킷으로 교체해 나중에 렌더링하도록 저장한다.
 fn update_pending_messages(
     msg: PreviewMessage,
     pending_raw: &mut Option<FramePacket>,
@@ -340,6 +353,7 @@ fn update_pending_messages(
     }
 }
 
+/// 윈도우가 생성되지 않았다면 새로 만들고, 존재하면 재사용한다.
 fn ensure_preview(
     target: &mut Option<SdlPreview>,
     env: &SdlEnv,
@@ -361,6 +375,7 @@ fn ensure_preview(
     Ok(())
 }
 
+/// 준비된 패킷을 SDL 프리뷰에 렌더링한다.
 fn present_packet(preview: Option<&mut SdlPreview>, packet: &FramePacket, is_raw: bool) {
     if let Some(preview) = preview {
         match &packet.payload {
@@ -396,6 +411,7 @@ fn present_packet(preview: Option<&mut SdlPreview>, packet: &FramePacket, is_raw
     }
 }
 
+/// OpenCV `Mat`을 프리뷰 크기에 맞게 리사이즈해 출력한다.
 fn render_resized_mat(
     preview: &mut SdlPreview,
     mat: &Mat,

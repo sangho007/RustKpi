@@ -5,6 +5,7 @@
 
 ## 구성 요소
 - `PwmCalibration`: I2C 버스, 디바이스 주소, 서보 채널, 기본 각도, 서보/모터 PWM 범위, 상태 로그 주기를 정의합니다.
+- `MotorChannelCalibration`: 각 모터의 IN1/IN2 채널 쌍을 묶어 `motor_control`이 올바른 PCA9685 채널을 선택할 수 있도록 합니다.
 - `Motor` / `Direction` 열거형: DC 모터 제어 대상과 회전 방향을 표현합니다.
 - 보조 함수:
   - `angle_to_pwm(angle: u32) -> u16`: 0-180도 입력을 서보 PWM off-cycle 값으로 선형 매핑합니다.

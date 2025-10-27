@@ -1,8 +1,6 @@
-//! Camera capture abstraction used by the BSW camera ECU.
-//!
-//! Provides a lightweight trait (`FrameCapture`) with implementations for
-//! OpenCV's `VideoCapture` and the libcamera bridge so upper layers can treat
-//! every source uniformly.
+//! BSW 카메라 ECU에서 사용하는 캡처 추상화 계층.
+//! - `FrameCapture` 트레이트를 통해 다양한 입력 소스를 동일한 방식으로 다룬다.
+//! - OpenCV `VideoCapture`와 libcamera 브릿지 구현을 제공해 개발/운영 환경을 모두 지원한다.
 
 use crate::calibration::camera::CameraCalibration;
 use crate::rte::rte_dto::{CameraBuffer, ColorFormat};
@@ -11,9 +9,9 @@ use opencv::prelude::{MatTraitConst, MatTraitConstManual, VideoCaptureTrait};
 use opencv::{Result, imgproc, videoio};
 use std::sync::Arc;
 
-/// Immutable metadata plus the pixel buffer for a captured frame.
-/// Buffer ownership is shared through `Arc` so downstream tasks may hold
-/// onto the image while the capture thread continues acquiring new frames.
+/// 캡처된 프레임의 픽셀 버퍼와 메타데이터를 담는 구조체.
+/// - `Arc`로 소유권을 공유하여 캡처 스레드가 새로운 프레임을 읽는 동안에도
+///   후속 처리 단계가 안전하게 동일한 버퍼를 참조할 수 있게 한다.
 pub struct CapturedFrame {
     pub buffer: Arc<CameraBuffer>,
     pub width: u32,
@@ -43,6 +41,8 @@ impl CapturedFrame {
     }
 }
 
+/// 입력 프레임을 캘리브레이션 해상도에 맞춰 리사이즈/크롭한다.
+/// - 소스와 타깃의 종횡비가 다른 경우 중앙을 기준으로 자른 뒤 리사이즈한다.
 fn fit_frame_to_target(frame: &Mat) -> Result<Mat> {
     let calibration = CameraCalibration::default();
     let target_width = calibration.width;
@@ -59,6 +59,7 @@ fn fit_frame_to_target(frame: &Mat) -> Result<Mat> {
     let view = if (src_ratio - target_ratio).abs() < f64::EPSILON {
         frame.clone()
     } else if src_ratio > target_ratio {
+        // 가로가 더 긴 경우 좌우를 잘라 타깃 비율에 맞춘다.
         let crop_width = ((src_height as f64) * target_ratio)
             .round()
             .clamp(1.0, src_width as f64) as i32;
@@ -66,6 +67,7 @@ fn fit_frame_to_target(frame: &Mat) -> Result<Mat> {
         let rect = Rect::new(offset_x, 0, crop_width, src_height);
         frame.roi(rect)?.try_clone()?
     } else {
+        // 세로가 더 긴 경우 위아래를 잘라 비율을 맞춘다.
         let crop_height = ((src_width as f64) / target_ratio)
             .round()
             .clamp(1.0, src_height as f64) as i32;
@@ -75,6 +77,7 @@ fn fit_frame_to_target(frame: &Mat) -> Result<Mat> {
     };
 
     let mut resized = Mat::default();
+    // OpenCV 리사이즈로 타깃 해상도에 맞춰 스케일링한다.
     imgproc::resize(
         &view,
         &mut resized,
@@ -97,7 +100,7 @@ pub trait FrameCapture: Send {
 
 // 기존 `videoio::VideoCapture`에 대해 Trait 구현
 impl FrameCapture for videoio::VideoCapture {
-    /// OpenCV `Mat`을 읽어 `CameraBuffer`로 복사한다.
+    /// OpenCV `Mat`을 읽어 `CameraBuffer`에 복사해 반환한다.
     fn read_frame(&mut self) -> Result<Option<CapturedFrame>> {
         let mut frame = Mat::default();
         if !VideoCaptureTrait::read(self, &mut frame)? || frame.empty() {
@@ -130,8 +133,9 @@ impl FrameCapture for libcamera_capture::LibcameraCapture {
     }
 }
 pub mod libcamera_capture {
-    //! Thin wrapper around the C++ libcamera bridge (see `src/bsw/lib/libcamera_bridge.cpp`).
-    //! Converts raw buffers into `CapturedFrame` and recycles memory via a pool.
+    //! C++로 작성된 libcamera 브릿지를 감싸는 얇은 래퍼.
+    //! - `src/bsw/lib/libcamera_bridge.cpp`에서 노출한 API를 FFI로 호출한다.
+    //! - 수신한 원시 버퍼를 `CapturedFrame`으로 변환하고, 버퍼 풀을 통해 메모리를 재사용한다.
     use super::CapturedFrame;
     use crate::rte::lib::camera_lib::{BufferRecycler, CameraBuffer, ColorFormat};
     use opencv::{Error, Result};
@@ -175,7 +179,8 @@ pub mod libcamera_capture {
         Error::new(opencv::core::StsError, msg.into())
     }
 
-    /// Simple reusable buffer pool shared across libcamera callbacks.
+    /// libcamera 콜백에서 재사용할 고정 길이 버퍼 풀.
+    /// - 프레임 캡처 시마다 새로 할당하지 않고, 미리 확보해 둔 버퍼를 돌려쓴다.
     struct BufferPool {
         buffer_len: usize,
         buffers: Mutex<Vec<Vec<u8>>>,
@@ -185,6 +190,7 @@ pub mod libcamera_capture {
         fn new(buffer_len: usize, preallocate: usize) -> Arc<Self> {
             let mut buffers = Vec::with_capacity(preallocate);
             for _ in 0..preallocate {
+                // libcamera가 요구하는 크기만큼 미리 버퍼 길이를 맞춰 둔다.
                 let mut vec = Vec::with_capacity(buffer_len);
                 unsafe {
                     vec.set_len(buffer_len);
@@ -201,6 +207,7 @@ pub mod libcamera_capture {
         fn acquire(&self) -> Vec<u8> {
             let mut guard = self.buffers.lock().unwrap();
             guard.pop().unwrap_or_else(|| {
+                // 풀에 여유 버퍼가 없으면 새로 확보한 뒤 길이를 강제로 맞춘다.
                 let mut vec = Vec::with_capacity(self.buffer_len);
                 unsafe {
                     vec.set_len(self.buffer_len);
@@ -221,7 +228,7 @@ pub mod libcamera_capture {
         }
     }
 
-    /// Wraps the native libcamera bridge handle and exposes it as `FrameCapture`.
+    /// C++ libcamera 브릿지 핸들을 감싸 `FrameCapture` 트레이트로 노출한다.
     pub struct LibcameraCapture {
         handle: NonNull<LibcameraBridgeOpaque>,
         width: u32,
@@ -236,7 +243,7 @@ pub mod libcamera_capture {
     impl LibcameraCapture {
         const LOG_INTERVAL: u64 = 120;
 
-        /// Initialise the bridge, discover stride/BPP and prime the buffer pool.
+        /// 브릿지를 초기화하고 stride/bpp 정보를 받아 버퍼 풀을 구성한다.
         pub fn new(width: u32, height: u32, fps: u32) -> Result<Self> {
             println!(
                 "[bsw][libcamera] new() requested width={} height={} fps={}",
@@ -310,8 +317,8 @@ pub mod libcamera_capture {
             })
         }
 
-        /// Grab a frame from the bridge and wrap it in `CameraBuffer`, returning
-        /// `None` if libcamera reported an empty frame.
+        /// 브릿지에서 프레임을 읽어 `CameraBuffer`로 감싼다.
+        /// - libcamera가 빈 프레임을 돌려주면 `None`을 반환해 상위에서 재시도하도록 한다.
         pub fn capture_frame(&mut self) -> Result<Option<CapturedFrame>> {
             let mut out_size = 0usize;
             let mut timestamp_ns = 0u64;
@@ -352,6 +359,7 @@ pub mod libcamera_capture {
             }
 
             if out_size < buffer.len() {
+                // 실제 데이터 크기가 더 작으면 남는 부분을 잘라 메모리를 절약한다.
                 buffer.truncate(out_size);
             }
 
@@ -364,6 +372,7 @@ pub mod libcamera_capture {
             }
 
             let recycler: Arc<dyn BufferRecycler> = self.pool.clone();
+            // RTE 레이어에서 버퍼를 반납하면 재사용되도록 리사이클러를 연결한다.
             let camera_buffer = CameraBuffer::from_vec_with_recycler(buffer, recycler);
 
             Ok(Some(CapturedFrame::new(

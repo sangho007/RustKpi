@@ -1,6 +1,12 @@
+//! ADAS 제어 로직에서 사용하는 파라미터 정의.
+//! - `AdasLateralCalibration`: 차선 각도 기반 조향 제어 설정.
+//! - `AdasLongitudinalCalibration`: 신호/초음파 기반 속도 제어 설정.
+
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug)]
+/// 차선 각도 조향 제어 파라미터.
+/// 서보 각도 범위와 비례 제어 게인, 레이트 리밋 값을 포함한다.
 pub struct AdasLateralCalibration {
     /// 비례 제어 게인: 서보각(도) = neutral + k * lane_angle(도)
     pub lane_to_servo_gain: f64,
@@ -29,6 +35,8 @@ impl Default for AdasLateralCalibration {
 }
 
 #[derive(Clone, Copy, Debug)]
+/// 종방향 속도 제어 파라미터.
+/// 속도 명령 비율과 거리 임계값, 로깅 주기를 설정한다.
 pub struct AdasLongitudinalCalibration {
     /// 제어 루프 주기
     pub control_period: Duration,

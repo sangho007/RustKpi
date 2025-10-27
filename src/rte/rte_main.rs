@@ -1,3 +1,6 @@
+//! RTE 채널 초기화 및 공유 구조체 정의.
+//! 각 ECU/ASW 태스크가 사용할 브로드캐스트 송신자를 생성한다.
+
 use crate::rte::rte_dto::{
     DtoCamBirdEyeView, DtoCamLaneAngle, DtoCamProcessed, DtoCamRaw, DtoDcMotorCtrl, DtoImu,
     DtoServoCtrl, DtoTcpTelemetry, DtoTrafficLight, DtoUltraSonicObstacle, DtoUltraSonicRaw,
@@ -30,6 +33,7 @@ const TCP_RAW_CAPACITY: usize = 16;
 const IMU_PARSED_CAPACITY: usize = 16;
 
 #[derive(Clone)]
+/// 카메라 처리 파이프라인에 필요한 브로드캐스트 송신자 묶음.
 pub struct CameraChannels {
     pub raw_tx: CamRawSender,
     pub processed_tx: CamProcessedSender,
@@ -39,29 +43,34 @@ pub struct CameraChannels {
 }
 
 #[derive(Clone)]
+/// 초음파 센서 관련 송신자.
 pub struct UltrasonicChannels {
     pub raw_tx: UltraRawSender,
     pub obstacle_tx: UltraObstacleSender,
 }
 
 #[derive(Clone)]
+/// 서보 및 DC 모터 제어 채널.
 pub struct ControlChannels {
     pub servo_tx: ServoCtrlSender,
     pub dc_motor_tx: DcMotorCtrlSender,
 }
 
 #[derive(Clone)]
+/// TCP 텔레메트리(USB 터널링) 채널.
 pub struct TcpChannels {
     pub telemetry_tx: TcpRawSender,
 }
 
 #[derive(Clone)]
+/// IMU 원시/파싱 채널 세트.
 pub struct ImuChannels {
     pub raw_tx: TcpRawSender,
     pub parsed_tx: ImuParsedSender,
 }
 
 #[derive(Clone)]
+/// 전체 RTE 채널 묶음.
 pub struct RteChannels {
     pub camera: CameraChannels,
     pub ultrasonic: UltrasonicChannels,
@@ -70,10 +79,12 @@ pub struct RteChannels {
     pub imu: ImuChannels,
 }
 
+/// RTE 시스템 초기화 결과.
 pub struct RteSystem {
     pub channels: RteChannels,
 }
 
+/// 모든 브로드캐스트 채널을 초기화하고 공유 핸들을 반환한다.
 pub fn init() -> RteSystem {
     let (cam_raw_tx, _) = broadcast::channel(CAM_RAW_CAPACITY);
     let (cam_processed_tx, _) = broadcast::channel(CAM_PROCESSED_CAPACITY);

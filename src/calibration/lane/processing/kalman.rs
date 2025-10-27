@@ -1,4 +1,7 @@
+//! 차선 각도 추정에 사용하는 1차원 칼만 필터 설정.
+
 #[derive(Clone, Copy, Debug)]
+/// 필터 사용 여부와 노이즈 공분산 등을 정의한다.
 pub struct KalmanCalibration {
     pub enabled: bool,
     pub process_noise: f64,

@@ -1,3 +1,6 @@
+//! 메인 런타임: RTE 채널에서 데이터를 수집해 프리뷰 GUI로 전달한다.
+//! 또한 IMU/초음파 로그를 출력하고 종료 시그널을 관리한다.
+
 use crate::rte::rte_dto::*;
 use crate::rte::rte_main::RteChannels;
 use crate::util::preview_runtime::{self, FramePacket, FramePayload, PreviewEvent, PreviewMessage};
@@ -5,6 +8,7 @@ use opencv::core::Mat;
 use opencv::prelude::MatTraitConst;
 use tokio::{select, sync::broadcast::error::RecvError};
 
+/// GUI 프리뷰를 활성화할지 여부.
 const DEBUG_ON: bool = false;
 
 /// RTE 채널을 사용하며 프리뷰 GUI와 데이터 스트림을 조율하는 메인 런타임 루프를 수행한다.

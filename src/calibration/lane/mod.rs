@@ -1,3 +1,6 @@
+//! 차선 검출 파이프라인에 필요한 캘리브레이션 묶음.
+//! 카메라/이미지/처리/런타임 설정을 프리셋 형태로 제공한다.
+
 pub mod camera;
 pub mod image;
 pub mod processing;
@@ -12,6 +15,7 @@ pub use processing::{
 pub use runtime::LaneRuntimeCalibration;
 
 #[derive(Clone, Copy, Debug)]
+/// 차선 검출에 필요한 모든 하위 설정을 묶은 구조체.
 pub struct LaneCalibration {
     pub camera: CameraCalibration,
     pub image: ImageCalibration,
@@ -20,6 +24,7 @@ pub struct LaneCalibration {
 }
 
 #[derive(Clone, Copy, Debug)]
+/// 지원하는 캘리브레이션 프리셋 목록.
 pub enum LaneCalibrationPreset {
     Hd1280x720,
     Vga640x480,
@@ -32,6 +37,7 @@ impl Default for LaneCalibration {
 }
 
 impl LaneCalibration {
+    /// 사전 정의된 프리셋으로 캘리브레이션을 구성한다.
     pub fn preset(preset: LaneCalibrationPreset) -> Self {
         match preset {
             LaneCalibrationPreset::Hd1280x720 => {
@@ -121,6 +127,7 @@ impl LaneCalibration {
         }
     }
 
+    /// 입력 해상도에 맞는 프리셋을 자동으로 선택한다.
     pub fn for_dimensions(width: i32, height: i32) -> Self {
         match (width, height) {
             (1280, 720) => Self::preset(LaneCalibrationPreset::Hd1280x720),

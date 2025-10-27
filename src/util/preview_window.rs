@@ -1,4 +1,4 @@
-use crate::rte::rte_dto::ColorFormat;
+//! SDL 창을 생성하고 프레임 데이터를 출력하기 위한 래퍼.\n+\n+use crate::rte::rte_dto::ColorFormat;
 use opencv::Error;
 use opencv::core::StsError;
 use sdl2::VideoSubsystem;
@@ -6,6 +6,7 @@ use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
 
+/// SDL2 캔버스를 감싸 프레임을 렌더링하는 헬퍼.
 pub struct SdlPreview {
     canvas: Canvas<Window>,
     frame_width: u32,
@@ -15,6 +16,7 @@ pub struct SdlPreview {
 }
 
 impl SdlPreview {
+    /// SDL 창과 캔버스를 초기화한다.
     pub fn new(
         video: &VideoSubsystem,
         title: &str,
@@ -53,6 +55,7 @@ impl SdlPreview {
         })
     }
 
+    /// 주어진 프레임 데이터를 텍스처로 갱신해 화면에 그린다.
     pub fn present(
         &mut self,
         width: u32,
@@ -112,15 +115,18 @@ impl SdlPreview {
         Ok(())
     }
 
+    /// SDL 창의 고유 ID를 반환한다.
     pub fn window_id(&self) -> u32 {
         self.canvas.window().id()
     }
 
+    /// 창을 최상단으로 끌어올린다.
     pub fn raise(&mut self) {
         self.canvas.window_mut().raise();
     }
 }
 
+/// 색상 포맷에 맞는 SDL 픽셀 포맷과 회색조 확장 여부를 반환한다.
 fn texture_config(format: ColorFormat) -> (PixelFormatEnum, bool) {
     match format {
         ColorFormat::Bgr => (PixelFormatEnum::BGR24, false),
@@ -130,6 +136,7 @@ fn texture_config(format: ColorFormat) -> (PixelFormatEnum, bool) {
     }
 }
 
+/// SDL 오류를 OpenCV 오류 형식으로 변환한다.
 fn sdl_err<E: ToString>(err: E) -> Error {
     Error::new(StsError, err.to_string())
 }
