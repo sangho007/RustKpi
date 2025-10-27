@@ -1,4 +1,15 @@
 
+# ecu_abs_com.rs - USB/TCP 텔레메트리 게이트웨이
+
+- 경로: `src/bsw/ecu_abs_com.rs`
+- 계층: BSW / ECU Abstraction (Communication)
+
+## 러너블 개요
+- `ComCalibration::default()`에서 바인드할 호스트/포트와 최대 페이로드 크기를 읽어옵니다.
+- `TcpListener::bind`로 IMU 송신기(iPhone ↔ usbmuxd 터널)를 기다리고, 연결 하나마다 `stream_telemetry`를 `tokio::spawn`으로 실행합니다.
+- 각 연결은 길이 헤더(4바이트 BE) + payload를 읽어 `DtoTcpTelemetry`로 패키징하고 `TcpChannels.telemetry_tx`에 브로드캐스트합니다.
+- `AtomicU32` alive 카운터로 수신 프레임 순서를 추적하고, `max_payload_size`를 초과하면 프레임을 버리고 경고합니다.
+- Ctrl-C 또는 서버 종료 시 워커 태스크를 모두 `abort` 후 종료 로그를 남깁니다.
 
 ## 아이폰 송신용 통신 설정 요약
 
@@ -229,4 +240,3 @@ private struct ProtoWriter {
     }
 }
 ```
-

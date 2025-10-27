@@ -4,11 +4,11 @@
 - 계층: ASW / Vision (Lane)
 
 ## 파이프라인 분할
-1. `runnable_pre_processing`  
+1. `runnable_vs_preprocessing`  
    - 입력: `CameraChannels.raw_tx`  
    - 처리: `LaneCalibration`의 필터/모폴로지 설정을 이용해 Gray → Blur → Canny → Closing을 수행하고 `DtoCamProcessed`로 게시합니다.  
    - 캐싱: `LaneRuntimeCalibration.process_interval`(0이면 매 프레임)을 기준으로 전처리를 건너뛰고 이전 결과(Arc<Mat>)를 재사용할 수 있습니다.
-2. `runnable_get_lane_angle`  
+2. `runnable_vs_get_lane_angle`  
    - 입력: `CameraChannels.processed_tx`  
    - 처리: ROI, 투시 변환, 슬라이딩 윈도우 추적, 칼만 필터 옵션을 통해 버드아이 뷰와 조향각을 계산합니다.  
    - 출력: `DtoCamBirdEyeView`, `DtoCamLaneAngle`

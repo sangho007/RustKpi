@@ -17,20 +17,21 @@
 
 ## 시스템 아키텍처
 ```
-┌────────────────────────────────────┐
-│   Application Software (ASW)       │ vs_lane, vs_trafficlight, forwardcollision_ultrasonic
-├────────────────────────────────────┤
-│   Runtime Environment (RTE)        │ DTO, Broadcast Channel, Scheduling
-├────────────────────────────────────┤
-│   Basic Software (BSW)             │ Camera, Ultrasonic, PCA9685 (servo/DC)
-└────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│   Application Software (ASW)                                         │ vs_lane, vs_trafficlight, forwardcollision_ultrasonic, adas_cod
+├──────────────────────────────────────────────────────────────────────┤
+│   Runtime Environment (RTE)                                          │ DTO, Broadcast Channels, Scheduling
+├──────────────────────────────────────────────────────────────────────┤
+│   Basic Software (BSW)                                               │ Camera, Ultrasonic, PCA9685, USB/TCP Gateway, IMU Decode
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 | 계층 | 주요 모듈 | 경로 |
 | --- | --- | --- |
-| ASW | `vs_lane`, `vs_trafficlight`, `forwardcollision_ultrasonic` | `src/asw/` |
+| ASW | `vs_lane`, `vs_trafficlight`, `forwardcollision_ultrasonic`, `adas_cod`, `adas_localization`, `adas_trajectory` | `src/asw/` |
 | RTE | `rte_main`, `rte_dto`, `lib` | `src/rte/` |
-| BSW | `ecu_abs_cam`, `ecu_abs_ultrasonic`, `ecu_abs_pwm`, `lib` | `src/bsw/` |
+| BSW | `ecu_abs_cam`, `ecu_abs_ultrasonic`, `ecu_abs_pwm`, `ecu_abs_com`, `ecu_abs_imu`, `lib` | `src/bsw/` |
+| Calibration | `lane`, `traffic_light`, `pwm`, `ultrasonic`, `forward_collision`, `com`, `adas_cod` | `src/calibration/` |
 
 ```
 src
@@ -39,20 +40,35 @@ src
 │   │   ├── forwardcollision_ultrasonic_lib.rs
 │   │   ├── vs_lane_lib.rs
 │   │   └── vs_trafficlight_lib.rs
+│   ├── adas_cod.rs
+│   ├── adas_localization.rs
+│   ├── adas_trajectory.rs
 │   ├── forwardcollision_ultrasonic.rs
 │   ├── vs_lane.rs
 │   └── vs_trafficlight.rs
 ├── bsw
 │   ├── lib
 │   │   ├── cam_lib.rs
+│   │   ├── imu_proto.rs
 │   │   ├── pwm_lib.rs
 │   │   └── ultrasonic_lib.rs
 │   ├── ecu_abs_cam.rs
+│   ├── ecu_abs_com.rs
+│   ├── ecu_abs_imu.rs
 │   ├── ecu_abs_pwm.rs
-│   ├── ecu_abs_ultrasonic.rs
+│   └── ecu_abs_ultrasonic.rs
+├── calibration
+│   ├── adas_cod.rs
+│   ├── com.rs
+│   ├── forward_collision.rs
+│   ├── lane
+│   ├── pwm.rs
+│   ├── traffic_light.rs
+│   └── ultrasonic.rs
 ├── rte
-│   ├── rte_dto.rs
-│   └── rte_main.rs
+│   ├── rte_dto.rs
+│   ├── rte_main.rs
+│   └── lib
 ├── main_runtime.rs
 └── main.rs
 
@@ -61,20 +77,22 @@ src
 ## AUTOSAR 적용 범위 & VFB 중심 접근
 - VFB: RTE DTO와 Broadcast 채널로 SW 컴포넌트 간 인터페이스를 정형화합니다.
 - 스택 단순화: 실험에 필요한 계층만 사용하고 BSW ECU Abstraction에 집중합니다.
-- BSW: `ecu_abs_*` 모듈이 카메라/초음파/PCA9685 제어를 담당합니다.
+- BSW: `ecu_abs_cam`, `ecu_abs_ultrasonic`, `ecu_abs_pwm`, `ecu_abs_com`, `ecu_abs_imu`가 센서·액추에이터·텔레메트리를 담당합니다.
 - MCAL: OS 디바이스 드라이버(`libcamera`, `i2cdev`, `pwm_pca9685`)를 대체 활용합니다.
 
 ## 소프트웨어 컴포넌트 (SWC) 개요
-- Vision_LaneFollowing (`src/asw/vs_lane.rs`): 전처리 → 투시 변환 → 슬라이딩 윈도우 → 조향각 계산. 칼만 필터 옵션 지원.
-- Vision_TrafficLight (`src/asw/vs_trafficlight.rs`): HSV + 모폴로지 + DBSCAN으로 신호색 판단.
+- Vision_LaneFollowing (`src/asw/vs_lane.rs`): 전처리 → 투시 변환 → 슬라이딩 윈도우 → 조향각 계산. 칼만 필터 옵션 및 프레임 스로틀을 지원합니다.
+- Vision_TrafficLight (`src/asw/vs_trafficlight.rs`): HSV + 모폴로지 + DBSCAN으로 신호색을 추정하고 디텍션 간격을 캘리브레이션합니다.
 - UltraSonic_ForwardCollision (`src/asw/forwardcollision_ultrasonic.rs`): 거리 임계값 기반 장애물 이벤트 생성.
-- ADAS Control Fusion (`src/asw/adas.rs`): 설계/스켈레톤 단계(차후 Trajectory Planning 포함 예정).
+- ADAS Control (`src/asw/adas_cod.rs`): 차선 각도 → 서보 제어(Lateral)와 초음파/신호등/IMU → DC 모터 제어(Longitudinal)를 분리된 러너블로 제공합니다.
+- ADAS Localization / Trajectory (`src/asw/adas_localization.rs`, `src/asw/adas_trajectory.rs`): 향후 경로 계획·센서 융합을 위한 플레이스홀더입니다.
 
 
 ### RTE 채널 흐름
 - 카메라: `raw_tx → processed_tx → bird_eye_tx / lane_angle_tx`, `raw_tx → traffic_light_tx`
 - 초음파: `raw_tx → obstacle_tx`
 - 제어: `servo_tx`, `dc_motor_tx`
+- 텔레메트리/IMU: `com.telemetry_tx`(TCP 원시 페이로드) → `imu.raw_tx` → `imu.parsed_tx`
 
 Broadcast 채널을 활용하여 각 Task가 비동기적으로 데이터를 주고받으며, `tokio` 런타임이 전체 파이프라인을 구성합니다.
 
@@ -83,8 +101,11 @@ Broadcast 채널을 활용하여 각 Task가 비동기적으로 데이터를 주
 - 카메라 파이프라인 (`src/asw/vs_lane.rs`, `src/asw/lib/vs_lane_lib.rs`): 전처리 → Bird's‑eye → 슬라이딩 윈도우 → 조향각. 칼만 필터 옵션.
 - 신호등 인지 (`src/asw/vs_trafficlight.rs`, `src/asw/lib/vs_trafficlight_lib.rs`): HSV → 모폴로지 → DBSCAN → 색 판단.
 - 초음파 장애물 감지 (`src/asw/forwardcollision_ultrasonic.rs`): 임계거리로 장애물 이벤트 생성.
-- ECU Abstraction (`src/bsw/ecu_abs_*.rs`): 카메라/초음파/PCA9685 제어.
+- ECU Abstraction (`src/bsw/ecu_abs_*.rs`): 카메라/초음파/PCA9685/USB-TCP Gateway/IMU 파서를 묶어 하드웨어 I/O를 담당합니다.
 - PCA9685 유틸 (`src/bsw/lib/pwm_lib.rs`): 서보/모터 변환 및 제어 유틸.
+- USB/TCP IMU Gateway (`src/bsw/ecu_abs_com.rs`): iPhone ARKit 텔레메트리를 TCP 길이 프레이밍으로 수신하고 RTE 브로드캐스트로 배포합니다.
+- IMU Protobuf Decoder (`src/bsw/ecu_abs_imu.rs`, `src/bsw/lib/imu_proto.rs`): Swift 앱이 보낸 protobuf payload를 파싱해 `DtoImu`로 변환하고 오일러 각까지 계산합니다.
+- ADAS 제어 러너블 (`src/asw/adas_cod.rs`): 차선 각도 기반 서보 제어(Lateral)와 장애물·신호등·거리 기반 DC 모터 제어(Longitudinal)를 구현합니다.
 - 런타임/프리뷰 (`src/main_runtime.rs`, `src/util/preview_*`): SDL2 기반 다중 창 프리뷰(ESC/창 닫기 종료).
 
 ### 카메라 해상도 & 캡처 모드
@@ -128,15 +149,7 @@ python tools/resize_video.py --input video/challenge.mp4 \
 
 ## 의존성(로컬 실행)
 - 시스템 패키지: OpenCV 런타임, SDL2 개발 패키지(예: Ubuntu `libsdl2-dev`)
-- Rust 크레이트: `tokio`, `opencv`, `sdl2`, `rayon`, `dbscan`, `hc-sr04`, `linux-embedded-hal`, `pwm-pca9685`
-
-## 향후 개선점
-- [ ] ADAS Control Fusion 러너블 구현 및 Trajectory Planning(순수추종/Stanley)
-- [ ] LCA를 위한 주변 객체 인지(추가 센서/비전)
-- [ ] 신호등/정지선 거리 추정, 정지/출발 속도 프로파일
-- [ ] AUTOSAR 서비스 계층(Diagnostics, NvM) 일부 도입
-- [ ] C/C++ 포팅 후 성능·안전성 비교 리포트
-- [ ] Yocto 기반 배포 이미지
+- Rust 크레이트: `tokio`, `opencv`, `sdl2`, `rayon`, `dbscan`, `hc-sr04`, `linux-embedded-hal`, `pwm-pca9685`, `prost`
 
 ## Rust vs C/C++ 비교 계획 
 - **안전성:** 메모리 안전, 데이터 레이스 방지

@@ -4,7 +4,7 @@
 - 계층: ASW / Ultrasonic → Obstacle
 
 ## 목적
-초음파 RAW 거리 데이터를 임계값 기반으로 이진 장애물 이벤트(`DtoUltraSonicObstacle`)로 변환합니다. FCA(Forward Collision Alert) 기능의 첫 단계입니다.
+초음파 RAW 거리 데이터를 임계값 기반으로 이진 장애물 이벤트(`DtoUltraSonicObstacle`)로 변환합니다. FCA(Forward Collision Alert) 기능의 첫 단계이며, 러너블 엔트리포인트는 `runnable_forwardcollision_obstacle_detection`입니다.
 
 ## 동작 요약
 - `forward_collision_calibration()`에서 임계 거리(`threshold_distance`, 기본 30cm)를 읽어옵니다.

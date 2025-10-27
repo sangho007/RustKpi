@@ -54,6 +54,8 @@ fn to_pose(raw: &proto::PoseWorldPhone) -> DtoImuPose {
     }
     if let Some(orientation) = raw.orientation.as_ref() {
         pose.orientation_quat = Some(quaternion_to_array(orientation));
+        pose.orientation_yaw_roll_pitch =
+            pose.orientation_quat.as_ref().map(quaternion_to_yaw_roll_pitch);
     }
     if let Some(cov) = raw.covariance.as_ref() {
         pose.position_cov = cov.pos.clone();
@@ -108,6 +110,82 @@ fn vector3_to_array(v: &proto::Vector3) -> [f64; 3] {
 
 fn quaternion_to_array(q: &proto::Quaternion) -> [f64; 4] {
     [q.x, q.y, q.z, q.w]
+}
+
+fn quaternion_to_yaw_roll_pitch(quat: &[f64; 4]) -> [f64; 3] {
+    let x = quat[0];
+    let y = quat[1];
+    let z = quat[2];
+    let w = quat[3];
+
+    let roll = {
+        let sinr_cosp = 2.0 * (w * x + y * z);
+        let cosr_cosp = 1.0 - 2.0 * (x * x + y * y);
+        sinr_cosp.atan2(cosr_cosp)
+    };
+
+    let pitch = {
+        let sinp = 2.0 * (w * y - z * x);
+        if sinp.abs() >= 1.0 {
+            sinp.signum() * std::f64::consts::FRAC_PI_2
+        } else {
+            sinp.asin()
+        }
+    };
+
+    let yaw = {
+        let siny_cosp = 2.0 * (w * z + x * y);
+        let cosy_cosp = 1.0 - 2.0 * (y * y + z * z);
+        siny_cosp.atan2(cosy_cosp)
+    };
+
+    [yaw, roll, pitch]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::f64::consts::FRAC_PI_2;
+
+    const EPS: f64 = 1e-6;
+
+    fn assert_close(actual: &[f64; 3], expected: &[f64; 3]) {
+        for (a, e) in actual.iter().zip(expected.iter()) {
+            assert!(
+                (a - e).abs() <= EPS,
+                "expected {:?}, got {:?}",
+                expected,
+                actual
+            );
+        }
+    }
+
+    #[test]
+    fn quaternion_identity_is_zero_euler() {
+        let euler = quaternion_to_yaw_roll_pitch(&[0.0, 0.0, 0.0, 1.0]);
+        assert_close(&euler, &[0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn quaternion_yaw_90_deg() {
+        let half = (0.5_f64).sqrt();
+        let euler = quaternion_to_yaw_roll_pitch(&[0.0, 0.0, half, half]);
+        assert_close(&euler, &[FRAC_PI_2, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn quaternion_roll_90_deg() {
+        let half = (0.5_f64).sqrt();
+        let euler = quaternion_to_yaw_roll_pitch(&[half, 0.0, 0.0, half]);
+        assert_close(&euler, &[0.0, FRAC_PI_2, 0.0]);
+    }
+
+    #[test]
+    fn quaternion_pitch_90_deg() {
+        let half = (0.5_f64).sqrt();
+        let euler = quaternion_to_yaw_roll_pitch(&[0.0, half, 0.0, half]);
+        assert_close(&euler, &[0.0, 0.0, FRAC_PI_2]);
+    }
 }
 
 fn normalize_string(value: Option<&String>) -> Option<String> {

@@ -4,7 +4,7 @@
 - 계층: ASW / Vision (Traffic Light)
 
 ## 목적
-Raw 카메라 프레임을 HSV 기반 컬러 세그멘테이션과 DBSCAN 클러스터링으로 분석해 신호등 색 상태(`DtoTrafficLight`)를 브로드캐스트합니다.
+Raw 카메라 프레임을 HSV 기반 컬러 세그멘테이션과 DBSCAN 클러스터링으로 분석해 신호등 색 상태(`DtoTrafficLight`)를 브로드캐스트합니다. 러너블 엔트리포인트는 `runnable_vs_detect_trafficlight`입니다.
 
 ## 처리 흐름
 1. `TrafficLightCalibration::default()`에서 ROI, HSV 임계값, DBSCAN 파라미터, `detection_interval`(기본 5)을 읽어옵니다. ROI는 카메라 해상도에 맞춰 스케일됩니다.

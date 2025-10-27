@@ -19,11 +19,15 @@ Tokio 멀티스레드 런타임을 초기화하고 RTE 채널, BSW 디바이스 
   - `bsw::ecu_abs_cam::ea_cam_provider`: `CameraCalibration` 설정에 따라 캡처 스레드를 띄우고 RAW DTO를 브로드캐스트합니다.
   - `bsw::ecu_abs_ultrasonic::ea_ultrasonic_provider`: `UltrasonicCalibration` 주기(기본 100ms)로 거리 샘플을 전송합니다.
   - `bsw::ecu_abs_pwm::ea_pca9685_actuator`: `PwmCalibration`을 기반으로 서보 각도와 모터 속도를 PCA9685에 반영합니다.
+  - `bsw::ecu_abs_com::ea_usb_tcp_gateway`: iPhone USB 터널을 통해 들어오는 IMU 원시 protobuf 페이로드를 수신합니다.
+  - `bsw::ecu_abs_imu::ea_imu_telemetry`: 원시 텔레메트리를 디코딩해 `DtoImu`로 변환하고 브로드캐스트합니다.
 - **ASW**
-  - `asw::vs_lane::runnable_pre_processing`: RAW 프레임을 전처리(`DtoCamProcessed`)해 퍼블리시합니다.
-  - `asw::vs_lane::runnable_get_lane_angle`: 버드아이 뷰와 조향각(`DtoCamBirdEyeView`, `DtoCamLaneAngle`)을 계산합니다.
-  - `asw::vs_trafficlight::runnable_trafficlight_detection`: HSV + DBSCAN 파이프라인으로 신호등 색(`DtoTrafficLight`)을 판정합니다.
-  - `asw::forwardcollision_ultrasonic::runnable_obstacle_detection`: 거리 임계값(`ForwardCollisionCalibration`)으로 장애물 이벤트(`DtoUltraSonicObstacle`)를 생성합니다.
+  - `asw::vs_lane::runnable_vs_preprocessing`: RAW 프레임을 전처리(`DtoCamProcessed`)해 퍼블리시합니다.
+  - `asw::vs_lane::runnable_vs_get_lane_angle`: 버드아이 뷰와 조향각(`DtoCamBirdEyeView`, `DtoCamLaneAngle`)을 계산합니다.
+  - `asw::vs_trafficlight::runnable_vs_detect_trafficlight`: HSV + DBSCAN 파이프라인으로 신호등 색(`DtoTrafficLight`)을 판정합니다.
+  - `asw::forwardcollision_ultrasonic::runnable_forwardcollision_obstacle_detection`: 거리 임계값(`ForwardCollisionCalibration`)으로 장애물 이벤트(`DtoUltraSonicObstacle`)를 생성합니다.
+  - `asw::adas_cod::runnable_adas_lateral`: LaneAngle에 비례 제어를 적용해 서보 명령을 결정합니다.
+  - `asw::adas_cod::runnable_adas_longitudinal`: 초음파/신호등/IMU 텔레메트리를 활용해 DC 모터 속도를 결정합니다.
 
 ## 런타임/종료 제어
 - `main_runtime::run`이 GUI 프리뷰 스레드(`util::preview_runtime`)를 조건부로 띄우고, 최신 프레임과 센서 데이터를 구독해 화면 출력 및 로그를 수행합니다.
@@ -34,5 +38,5 @@ Tokio 멀티스레드 런타임을 초기화하고 RTE 채널, BSW 디바이스 
 - 채널 `Lagged` 또는 `Closed` 이벤트는 각 태스크에서 경고 로그를 남기고, 상황에 따라 루프를 유지하거나 종료합니다.
 
 ## TODO
-- `asw::adas` 융합 태스크를 실제 제어 경로로 연결합니다.
+- ADAS Localization/Trajectory 태스크와 GUI 텔레메트리 오버레이를 연결합니다.
 - GUI/텔레메트리 옵션 정리와 성능 계측 루틴을 보강합니다.

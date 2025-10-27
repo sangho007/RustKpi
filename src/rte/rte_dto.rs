@@ -203,6 +203,7 @@ pub struct DtoImuStatus {
 pub struct DtoImuPose {
     pub position_world: Option<[f64; 3]>,
     pub orientation_quat: Option<[f64; 4]>,
+    pub orientation_yaw_roll_pitch: Option<[f64; 3]>,
     pub position_cov: Vec<f64>,
     pub orientation_cov: Vec<f64>,
     pub valid: Option<bool>,

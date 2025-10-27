@@ -4,12 +4,13 @@
 - 계층: RTE / 채널 & 스케줄링
 
 ## 목적
-Tokio broadcast 채널을 생성하고 카메라, 초음파, 제어 그룹으로 묶은 구조체를 제공합니다. 애플리케이션 전역에서 동일한 채널 핸들을 공유할 수 있도록 `RteSystem`으로 래핑합니다.
+Tokio broadcast 채널을 생성하고 카메라, 초음파, 제어, TCP 텔레메트리, IMU 그룹으로 묶은 구조체를 제공합니다. 애플리케이션 전역에서 동일한 채널 핸들을 공유할 수 있도록 `RteSystem`으로 래핑합니다.
 
 ## 채널 타입 별칭
 - 카메라: `CamRawSender`, `CamProcessedSender`, `CamBirdEyeSender`, `CamLaneAngleSender`, `TrafficLightSender`
 - 초음파: `UltraRawSender`, `UltraObstacleSender`
 - 제어: `ServoCtrlSender`, `DcMotorCtrlSender`
+- 텔레메트리/IMU: `TcpRawSender`, `ImuParsedSender`
 
 ## 버퍼 용량
 - `CAM_RAW_CAPACITY = 2`
@@ -21,6 +22,8 @@ Tokio broadcast 채널을 생성하고 카메라, 초음파, 제어 그룹으로
 - `ULTRA_OBSTACLE_CAPACITY = 8`
 - `SERVO_CTRL_CAPACITY = 16`
 - `DC_CTRL_CAPACITY = 16`
+- `TCP_RAW_CAPACITY = 16`
+- `IMU_PARSED_CAPACITY = 16`
 
 Raw 채널은 지연을 최소화하기 위해 깊이를 2로 제한하고, 이후 파이프라인 단계는 더 큰 버퍼로 팬아웃을 허용합니다.
 
@@ -28,7 +31,9 @@ Raw 채널은 지연을 최소화하기 위해 깊이를 2로 제한하고, 이�
 - `CameraChannels { raw_tx, processed_tx, bird_eye_tx, lane_angle_tx, traffic_light_tx }`
 - `UltrasonicChannels { raw_tx, obstacle_tx }`
 - `ControlChannels { servo_tx, dc_motor_tx }`
-- `RteChannels { camera, ultrasonic, control }`
+- `TcpChannels { telemetry_tx }`
+- `ImuChannels { raw_tx, parsed_tx }`
+- `RteChannels { camera, ultrasonic, control, com, imu }`
 - `RteSystem { channels }`
 
 ## 초기화 흐름
@@ -39,3 +44,4 @@ Raw 채널은 지연을 최소화하기 위해 깊이를 2로 제한하고, 이�
 - 카메라: `raw_tx → processed_tx → bird_eye_tx / lane_angle_tx`, `raw_tx → traffic_light_tx`
 - 초음파: `raw_tx → obstacle_tx`
 - 제어: 애플리케이션(ASW)에서 `servo_tx`, `dc_motor_tx`로 명령을 게시하면 BSW 액추에이터가 구독해 하드웨어에 반영합니다.
+- 텔레메트리: `com.telemetry_tx`로 TCP 수신 데이터를 브로드캐스트하고, `imu.raw_tx → imu.parsed_tx`로 protobuf를 파싱해 ASW/GUI가 구독합니다.
