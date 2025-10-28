@@ -3,7 +3,8 @@
 
 use crate::rte::rte_dto::{
     DtoCamBirdEyeView, DtoCamLaneAngle, DtoCamProcessed, DtoCamRaw, DtoDcMotorCtrl, DtoImu,
-    DtoServoCtrl, DtoTcpTelemetry, DtoTrafficLight, DtoUltraSonicObstacle, DtoUltraSonicRaw,
+    DtoLocalizationState, DtoServoCtrl, DtoTcpTelemetry, DtoTrafficLight, DtoUltraSonicObstacle,
+    DtoUltraSonicRaw,
 };
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -19,6 +20,7 @@ pub type ServoCtrlSender = broadcast::Sender<Arc<DtoServoCtrl>>;
 pub type DcMotorCtrlSender = broadcast::Sender<Arc<DtoDcMotorCtrl>>;
 pub type TcpRawSender = broadcast::Sender<Arc<DtoTcpTelemetry>>;
 pub type ImuParsedSender = broadcast::Sender<Arc<DtoImu>>;
+pub type LocalizationStateSender = broadcast::Sender<Arc<DtoLocalizationState>>;
 
 const CAM_RAW_CAPACITY: usize = 2;
 const CAM_PROCESSED_CAPACITY: usize = 6;
@@ -31,6 +33,7 @@ const SERVO_CTRL_CAPACITY: usize = 16;
 const DC_CTRL_CAPACITY: usize = 16;
 const TCP_RAW_CAPACITY: usize = 16;
 const IMU_PARSED_CAPACITY: usize = 16;
+const LOCALIZATION_STATE_CAPACITY: usize = 16;
 
 #[derive(Clone)]
 /// 카메라 처리 파이프라인에 필요한 브로드캐스트 송신자 묶음.
@@ -70,6 +73,12 @@ pub struct ImuChannels {
 }
 
 #[derive(Clone)]
+/// 로컬라이제이션 상태 공유 채널.
+pub struct LocalizationChannels {
+    pub state_tx: LocalizationStateSender,
+}
+
+#[derive(Clone)]
 /// 전체 RTE 채널 묶음.
 pub struct RteChannels {
     pub camera: CameraChannels,
@@ -77,6 +86,7 @@ pub struct RteChannels {
     pub control: ControlChannels,
     pub com: TcpChannels,
     pub imu: ImuChannels,
+    pub localization: LocalizationChannels,
 }
 
 /// RTE 시스템 초기화 결과.
@@ -99,6 +109,7 @@ pub fn init() -> RteSystem {
     let (dc_motor_ctrl_tx, _) = broadcast::channel(DC_CTRL_CAPACITY);
     let (imu_raw_tx, _) = broadcast::channel(TCP_RAW_CAPACITY);
     let (imu_parsed_tx, _) = broadcast::channel(IMU_PARSED_CAPACITY);
+    let (localization_state_tx, _) = broadcast::channel(LOCALIZATION_STATE_CAPACITY);
 
     let camera = CameraChannels {
         raw_tx: cam_raw_tx,
@@ -124,6 +135,9 @@ pub fn init() -> RteSystem {
         raw_tx: imu_raw_tx,
         parsed_tx: imu_parsed_tx,
     };
+    let localization = LocalizationChannels {
+        state_tx: localization_state_tx,
+    };
 
     RteSystem {
         channels: RteChannels {
@@ -132,6 +146,7 @@ pub fn init() -> RteSystem {
             control,
             com,
             imu,
+            localization,
         },
     }
 }

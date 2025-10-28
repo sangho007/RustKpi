@@ -63,8 +63,10 @@ fn to_pose(raw: &proto::PoseWorldPhone) -> DtoImuPose {
     }
     if let Some(orientation) = raw.orientation.as_ref() {
         pose.orientation_quat = Some(quaternion_to_array(orientation));
-        pose.orientation_yaw_roll_pitch =
-            pose.orientation_quat.as_ref().map(quaternion_to_yaw_roll_pitch);
+        pose.orientation_yaw_roll_pitch = pose
+            .orientation_quat
+            .as_ref()
+            .map(quaternion_to_yaw_roll_pitch);
     }
     if let Some(cov) = raw.covariance.as_ref() {
         pose.position_cov = cov.pos.clone();

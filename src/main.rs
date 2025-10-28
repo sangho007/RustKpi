@@ -110,6 +110,14 @@ async fn main() -> opencv::Result<()> {
         }));
     }
 
+    // ASW Localization Task
+    {
+        let chans = channels.clone();
+        tasks.push(tokio::spawn(async move {
+            asw::adas_localization::runnable_adas_localization("ADAS-Localization", chans).await;
+        }));
+    }
+
     // ADAS Lateral Control Task
     {
         let chans = channels.clone();

@@ -2,6 +2,7 @@
 //! 각 DTO는 채널을 통해 전달되는 메시지 구조를 명시해 계층 간 의존성을 줄인다.
 
 use crate::asw::lib::vs_trafficlight_lib::TrafficLightColor;
+use crate::calibration::{LocalizationLane, LocalizationMapId};
 use crate::rte::lib::camera_lib;
 pub use crate::rte::lib::camera_lib::{CameraBuffer, ColorFormat};
 use opencv::core::Mat;
@@ -53,8 +54,14 @@ impl DtoCamRaw {
     }
 
     /// 색상 포맷이 다르더라도 BGR `Mat`으로 변환해 반환한다.
-    let base = self.as_mat_view()?;
+    pub fn as_bgr(&self) -> opencv::Result<Mat> {
+        let base = self.as_mat_view()?;
         camera_lib::ensure_bgr(&base, self.color_format)
+    }
+
+    /// 과거 인터페이스와의 호환을 위해 `as_bgr_mat` 별칭을 유지한다.
+    pub fn as_bgr_mat(&self) -> opencv::Result<Mat> {
+        self.as_bgr()
     }
 }
 
@@ -295,6 +302,57 @@ impl DtoImu {
             acceleration,
             gyro,
             alive_cnt,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+/// 차량의 yaw 값을 도출한 데이터 소스.
+pub enum LocalizationYawSource {
+    ImuYaw,
+    ImuPitch,
+    ImuRoll,
+    MotionEstimate,
+}
+
+#[derive(Debug, Clone)]
+/// 2D 맵 좌표계에서 차량 위치/자세 정보를 전달하는 DTO.
+pub struct DtoLocalizationState {
+    pub map_id: LocalizationMapId,
+    pub lane: LocalizationLane,
+    pub position_map_xy: [f64; 2],
+    pub displacement_imu_xyz: [f64; 3],
+    pub yaw_rad: f64,
+    pub yaw_source: LocalizationYawSource,
+    pub motion_heading_rad: Option<f64>,
+    pub timestamp_ns: u64,
+    pub imu_alive_cnt: u32,
+}
+
+impl DtoLocalizationState {
+    /// 신규 로컬라이제이션 상태 DTO를 생성한다.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        map_id: LocalizationMapId,
+        lane: LocalizationLane,
+        position_map_xy: [f64; 2],
+        displacement_imu_xyz: [f64; 3],
+        yaw_rad: f64,
+        yaw_source: LocalizationYawSource,
+        motion_heading_rad: Option<f64>,
+        timestamp_ns: u64,
+        imu_alive_cnt: u32,
+    ) -> Self {
+        Self {
+            map_id,
+            lane,
+            position_map_xy,
+            displacement_imu_xyz,
+            yaw_rad,
+            yaw_source,
+            motion_heading_rad,
+            timestamp_ns,
+            imu_alive_cnt,
         }
     }
 }

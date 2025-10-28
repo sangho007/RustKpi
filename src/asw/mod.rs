@@ -4,8 +4,8 @@
 pub mod adas_cod;
 pub mod adas_localization;
 pub mod adas_path_global;
+pub mod adas_path_local;
 pub mod forwardcollision_ultrasonic;
 pub mod lib;
 pub mod vs_lane;
 pub mod vs_trafficlight;
-pub mod adas_path_local;

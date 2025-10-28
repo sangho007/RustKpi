@@ -1,4 +1,5 @@
-//! SDL 창을 생성하고 프레임 데이터를 출력하기 위한 래퍼.\n+\n+use crate::rte::rte_dto::ColorFormat;
+//! SDL 창을 생성하고 프레임 데이터를 출력하기 위한 래퍼.
+use crate::rte::rte_dto::ColorFormat;
 use opencv::Error;
 use opencv::core::StsError;
 use sdl2::VideoSubsystem;
