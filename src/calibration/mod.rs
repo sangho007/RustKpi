@@ -3,6 +3,7 @@
 
 pub mod adas_cod;
 pub mod adas_localization;
+pub mod adas_path;
 pub mod com;
 pub mod forward_collision;
 pub mod lane;
@@ -16,4 +17,5 @@ pub use adas_localization::{
     LocalizationDestination, LocalizationLane, LocalizationMapId, LocalizationMapPreset,
     LocalizationStart,
 };
+pub use adas_path::{AdasPathGlobalCalibration, AdasPathLocalCalibration};
 pub use lane::{LaneCalibration, LaneCalibrationPreset, camera};

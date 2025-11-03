@@ -2,11 +2,12 @@
 //! - `runnable_adas_lateral`: 차선 추정 결과를 이용해 조향 서보를 제어한다.
 //! - `runnable_adas_longitudinal`: 장애물과 신호 정보를 사용해 종방향 속도를 결정한다.
 
+use crate::asw::lib::adas_path_lib::curvature_from_smoothed_path;
 use crate::asw::lib::vs_trafficlight_lib::TrafficLightColor;
 use crate::calibration::{AdasLateralCalibration, AdasLongitudinalCalibration};
 use crate::rte::rte_dto::{
-    DtoCamLaneAngle, DtoDcMotorCtrl, DtoServoCtrl, DtoTrafficLight, DtoTrafficLightDirective,
-    DtoUltraSonicObstacle, DtoUltraSonicRaw,
+    AdasLaneChangeState, DtoAdasSmoothedPath, DtoCamLaneAngle, DtoDcMotorCtrl, DtoServoCtrl,
+    DtoTrafficLight, DtoTrafficLightDirective, DtoUltraSonicObstacle, DtoUltraSonicRaw,
 };
 use crate::rte::rte_main::RteChannels;
 use std::sync::Arc;
@@ -21,6 +22,7 @@ use tokio::time;
 pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     let calib = AdasLateralCalibration::default();
     let mut lane_rx = channels.camera.lane_angle_tx.subscribe();
+    let mut path_rx = channels.path.smoothed_tx.subscribe();
     let servo_tx = channels.control.servo_tx.clone();
 
     // 제어 루프 주기(기본 50ms)
@@ -28,6 +30,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
 
     // 최신 신호 캐시
     let mut latest_lane: Option<DtoCamLaneAngle> = None;
+    let mut latest_path: Option<DtoAdasSmoothedPath> = None;
     let mut last_cmd_deg: u32 = calib.servo_neutral_deg;
     let mut last_log: Instant = Instant::now();
 
@@ -48,19 +51,60 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             }
         }
 
+        match path_rx.try_recv() {
+            Ok(dto) => {
+                latest_path = Some(dto.as_ref().clone());
+                while let Ok(newer) = path_rx.try_recv() {
+                    latest_path = Some(newer.as_ref().clone());
+                }
+            }
+            Err(TryRecvError::Lagged(n)) => {
+                eprintln!("[{}] ADAS lateral smoothed_path lagged by {}", id, n);
+            }
+            Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
+        }
+
         // 제어 주기 동기화
         tick.tick().await;
 
-        // LaneAngle이 없다면 중립 유지
-        let target_deg = if let Some(lane) = latest_lane.as_ref() {
-            // 비례 제어: servo = neutral + k * angle
-            let cmd = (calib.servo_neutral_deg as f64 + calib.lane_to_servo_gain * lane.angle)
-                .round() as i32;
-            cmd.clamp(calib.servo_min_deg as i32, calib.servo_max_deg as i32) as u32
+        let lane_state = latest_path.as_ref().map(|path| path.lane_change_state);
+
+        let curvature = if let Some(path) = latest_path.as_ref() {
+            match curvature_from_smoothed_path(path) {
+                Ok(value) => value,
+                Err(err) => {
+                    eprintln!("[{}] ADAS lateral curvature 계산 실패: {}", id, err);
+                    0.0
+                }
+            }
         } else {
-            // 데이터가 없으면 조향을 중립 상태로 유지한다.
-            calib.servo_neutral_deg
+            0.0
         };
+
+        let mut lane_offset = latest_lane
+            .as_ref()
+            .map(|lane| lane.lateral_offset)
+            .unwrap_or(0.0);
+        let mut lane_angle = latest_lane.as_ref().map(|lane| lane.angle).unwrap_or(0.0);
+        if let Some(state) = lane_state {
+            if !matches!(
+                state,
+                AdasLaneChangeState::InnerCruise | AdasLaneChangeState::OuterCruise
+            ) {
+                lane_offset = 0.0;
+                lane_angle = 0.0;
+            }
+        }
+
+        let target_angle = calib.curvature_to_servo_gain * curvature
+            + calib.lane_to_servo_gain * lane_angle
+            + calib.lateral_offset_gain * lane_offset;
+
+        let base_cmd = calib.servo_neutral_deg as f64 + target_angle;
+        let target_deg = base_cmd
+            .round()
+            .clamp(calib.servo_min_deg as f64, calib.servo_max_deg as f64)
+            as u32;
 
         // 레이트 리밋을 적용해 갑작스러운 조향 변화를 제한한다.
         let delta = if target_deg >= last_cmd_deg {
@@ -85,19 +129,41 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
 
         // 1초마다 현재 제어 상태를 요약해 로깅한다.
         if last_log.elapsed() > std::time::Duration::from_secs(1) {
-            if let Some(lane) = latest_lane.as_ref() {
-                println!(
-                    "[{}] Lateral: lane_angle={:.2} -> servo={}deg",
-                    id, lane.angle, last_cmd_deg
-                );
-            } else {
-                println!(
-                    "[{}] Lateral: lane_angle=-- -> servo={}deg",
-                    id, last_cmd_deg
-                );
-            }
+            let lane_angle_display = latest_lane
+                .as_ref()
+                .map(|lane| format!("{:.2}", lane.angle))
+                .unwrap_or_else(|| "--".to_string());
+            let lane_offset_display = latest_lane
+                .as_ref()
+                .map(|lane| format!("{:.2}", lane.lateral_offset))
+                .unwrap_or_else(|| "--".to_string());
+            let state_display = lane_state
+                .map(|state| format!("{:?}", state))
+                .unwrap_or_else(|| "--".to_string());
+            println!(
+                "[{}] Lateral: curvature={:.4}, lane_angle={} offset={} state={} -> servo={}deg",
+                id, curvature, lane_angle_display, lane_offset_display, state_display, last_cmd_deg
+            );
             last_log = Instant::now();
         }
+    }
+}
+
+fn apply_speed_rate_limit(
+    previous_speed: u32,
+    desired_speed: u32,
+    calib: &AdasLongitudinalCalibration,
+) -> u32 {
+    if desired_speed > previous_speed {
+        let step = calib.max_accel_delta_percent.max(1);
+        let delta = desired_speed - previous_speed;
+        previous_speed + delta.min(step)
+    } else if desired_speed < previous_speed {
+        let step = calib.max_decel_delta_percent.max(1);
+        let delta = previous_speed - desired_speed;
+        previous_speed.saturating_sub(delta.min(step))
+    } else {
+        desired_speed
     }
 }
 
@@ -112,6 +178,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let mut obstacle_rx = channels.ultrasonic.obstacle_tx.subscribe();
     let mut traffic_rx = channels.camera.traffic_light_tx.subscribe();
     let mut traffic_directive_rx = channels.camera.traffic_light_directive_tx.subscribe();
+    let mut path_rx = channels.path.smoothed_tx.subscribe();
     let dc_tx = channels.control.dc_motor_tx.clone();
 
     let mut tick = time::interval(calib.control_period);
@@ -121,9 +188,13 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let mut latest_obstacle: Option<DtoUltraSonicObstacle> = None;
     let mut latest_signal: Option<DtoTrafficLight> = None;
     let mut latest_directive: Option<DtoTrafficLightDirective> = None;
+    let mut latest_path: Option<DtoAdasSmoothedPath> = None;
     let mut last_cmd: Option<(u32, u32)> = None;
     let mut alive_cnt: u32 = 0;
     let mut last_log = Instant::now();
+    let mut stop_request_since: Option<Instant> = None;
+    let mut stop_release_since: Option<Instant> = None;
+    let mut stop_engaged = false;
 
     loop {
         // 초음파 거리 측정값 확인
@@ -182,6 +253,18 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             }
             Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
         }
+        match path_rx.try_recv() {
+            Ok(dto) => {
+                latest_path = Some(dto.as_ref().clone());
+                while let Ok(newer) = path_rx.try_recv() {
+                    latest_path = Some(newer.as_ref().clone());
+                }
+            }
+            Err(TryRecvError::Lagged(n)) => {
+                eprintln!("[{}] ADAS longitudinal smoothed_path lagged by {}", id, n);
+            }
+            Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
+        }
 
         tick.tick().await;
 
@@ -203,7 +286,6 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             .as_ref()
             .map(|d| d.stop_requested && d.inside_detection_zone)
             .unwrap_or(false);
-        let stop_requested = stop_requested_obstacle || stop_requested_signal;
         let lane_change_requested = obstacle_status
             .map(|d| d.lane_change_requested)
             .unwrap_or(false);
@@ -216,9 +298,9 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             .map(|signal| signal.traffic_light_color.clone());
 
         // 장애물·신호·거리 조건을 종합해 정지 여부를 결정한다.
-        let need_stop = stop_requested
-            || matches!(traffic_color.as_ref(), Some(TrafficLightColor::Red))
-            || distance_state.0;
+        let obstacle_stop = stop_requested_obstacle;
+        let traffic_stop =
+            matches!(traffic_color.as_ref(), Some(TrafficLightColor::Red)) || stop_requested_signal;
 
         let caution_signal = matches!(
             traffic_color.as_ref(),
@@ -230,18 +312,93 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             caution_signal || distance_state.1 || lane_change_requested
         };
 
-        let (direction, speed) = if need_stop {
-            (0, 0)
-        } else if need_caution {
-            (1, calib.crawl_speed_percent)
-        } else {
-            (1, calib.cruise_speed_percent)
-        };
+        let path_ready = latest_path
+            .as_ref()
+            .map(|path| !path.samples_xy.is_empty())
+            .unwrap_or(false);
+        let gating_stop = !path_ready;
 
-        let command = (direction, speed);
+        let curvature_abs = latest_path
+            .as_ref()
+            .and_then(|path| curvature_from_smoothed_path(path).ok())
+            .map(|curv| curv.abs())
+            .unwrap_or(0.0);
+
+        let mut gain = 1.0;
+        if curvature_abs > calib.curvature_slowdown_threshold {
+            gain *= 0.8;
+        }
+
+        let base_stop_reason = if obstacle_stop {
+            Some("obstacle")
+        } else if traffic_stop {
+            Some("traffic")
+        } else {
+            None
+        };
+        let mut effective_stop_reason = base_stop_reason;
+        if gating_stop {
+            effective_stop_reason = Some("no_path");
+        }
+
+        let now = Instant::now();
+        if let Some(_reason) = effective_stop_reason {
+            if stop_request_since.is_none() {
+                stop_request_since = Some(now);
+            }
+            stop_release_since = None;
+            if stop_request_since
+                .map(|t| now.duration_since(t) >= calib.stop_request_hold_time)
+                .unwrap_or(false)
+            {
+                stop_engaged = true;
+            }
+        } else {
+            stop_request_since = None;
+            if stop_engaged {
+                if stop_release_since.is_none() {
+                    stop_release_since = Some(now);
+                }
+                if stop_release_since
+                    .map(|t| now.duration_since(t) >= calib.stop_release_hold_time)
+                    .unwrap_or(false)
+                {
+                    stop_engaged = false;
+                    stop_release_since = None;
+                }
+            }
+        }
+
+        if stop_engaged || gating_stop {
+            gain = 0.0;
+        } else if need_caution {
+            gain *= 0.6;
+        }
+
+        let mut desired_command = if gain <= 0.0 {
+            (0, 0)
+        } else {
+            let commanded = (calib.cruise_speed_percent as f64 * gain)
+                .round()
+                .clamp(0.0, calib.cruise_speed_percent as f64) as u32;
+            if commanded == 0 {
+                (0, 0)
+            } else {
+                (1, commanded)
+            }
+        };
+        if gating_stop {
+            desired_command = (0, 0);
+        }
+
+        let previous_speed = last_cmd.map(|(_, spd)| spd).unwrap_or(0);
+        let limited_speed = apply_speed_rate_limit(previous_speed, desired_command.1, &calib);
+        let limited_direction = if limited_speed == 0 { 0 } else { 1 };
+        let command = (limited_direction, limited_speed);
+
         if last_cmd.map(|prev| prev != command).unwrap_or(true) {
             // 명령이 변경되었을 때만 DC 모터 채널로 전송해 불필요한 통신을 줄인다.
-            let dto = DtoDcMotorCtrl::new(direction, speed, alive_cnt);
+            let dto = DtoDcMotorCtrl::new(command.0, command.1, alive_cnt);
             let _ = dc_tx.send(Arc::new(dto));
             alive_cnt = alive_cnt.wrapping_add(1);
             last_cmd = Some(command);
@@ -252,16 +409,24 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             let distance_str = distance_cm
                 .map(|d| format!("{:.1}", d))
                 .unwrap_or_else(|| "--".to_string());
+            let stop_display = if stop_engaged || gating_stop {
+                effective_stop_reason.unwrap_or("--")
+            } else {
+                "--"
+            };
             println!(
-                "[{}] Longitudinal: dist={}cm stop_req={} lane_change={} accel_req={} signal={:?} -> dir={} speed={}",
+                "[{}] Longitudinal: dist={}cm curvature={:.4} gain={:.2} stop={} lane_change={} accel_req={} path_ready={} signal={:?} -> dir={} speed={}",
                 id,
                 distance_str,
-                stop_requested,
+                curvature_abs,
+                gain,
+                stop_display,
                 lane_change_requested,
                 accelerate_requested,
+                path_ready,
                 traffic_color,
-                direction,
-                speed
+                command.0,
+                command.1
             );
             last_log = Instant::now();
         }

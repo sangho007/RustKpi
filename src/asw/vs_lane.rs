@@ -27,7 +27,6 @@ pub async fn runnable_vs_preprocessing(
     let (done_tx, done_rx) = oneshot::channel();
     let calibration = LaneCalibration::preset(LaneCalibrationPreset::Vga640x480);
     let runtime_calibration = calibration.runtime;
-    let lane_task_config = LaneTaskConfig::new(calibration.processing.kalman.enabled);
 
     // 영상 처리는 OpenCV `Mat`을 많이 다루므로 전용 OS 스레드에서 수행한다.
     thread::Builder::new()
@@ -36,7 +35,7 @@ pub async fn runnable_vs_preprocessing(
             let mut rx = raw_tx.subscribe();
             let mut alive_cnt = 0;
 
-            let pipeline = match Pipeline::new_with_settings(lane_task_config.use_kalman) {
+            let pipeline = match Pipeline::new() {
                 Ok(pipeline) => pipeline,
                 Err(err) => {
                     let _ = done_tx.send(Err(err));
@@ -146,7 +145,6 @@ pub async fn runnable_vs_get_lane_angle(
     let (done_tx, done_rx) = oneshot::channel();
     let calibration = LaneCalibration::preset(LaneCalibrationPreset::Vga640x480);
     let runtime_calibration = calibration.runtime;
-    let lane_task_config = LaneTaskConfig::new(calibration.processing.kalman.enabled);
 
     // 차선 각도 계산 역시 CPU 집약적이므로 전용 스레드에서 처리한다.
     thread::Builder::new()
@@ -155,23 +153,19 @@ pub async fn runnable_vs_get_lane_angle(
             let mut rx = processed_tx.subscribe();
             let mut alive_cnt: u32 = 0;
 
-            let mut pipeline = match Pipeline::new_with_settings(lane_task_config.use_kalman) {
+            let mut pipeline = match Pipeline::new() {
                 Ok(p) => p,
                 Err(err) => {
                     let _ = done_tx.send(Err(err));
                     return;
                 }
             };
-            if lane_task_config.use_kalman {
-                // 칼만 필터를 초기화해 연속 프레임 간 노이즈를 줄인다.
-                let kalman = calibration.processing.kalman;
-                pipeline.reset_kalman(kalman.initial_estimate, kalman.initial_covariance);
-            }
             let process_interval = runtime_calibration.process_interval;
             let mut frame_counter: u32 = 0;
             let mut fps_start = Instant::now();
             let mut last_birds_eye: Option<Arc<Mat>> = None;
             let mut last_angle: f64 = 0.0;
+            let mut last_offset: f64 = 0.0;
 
             let result = (|| -> opencv::Result<()> {
                 loop {
@@ -192,7 +186,7 @@ pub async fn runnable_vs_get_lane_angle(
                         || (alive_cnt % process_interval == 0)
                         || last_birds_eye.is_none();
 
-                    let (birds_eye_arc, steering_angle) = if should_process {
+                    let (birds_eye_arc, steering_angle, lateral_offset) = if should_process {
                         let roi_img = pipeline.roi(&cam_processed.img)?;
                         let birds_eye_binary = pipeline.perspective_transform(&roi_img)?;
                         let sliding = calibration.processing.sliding;
@@ -227,27 +221,38 @@ pub async fn runnable_vs_get_lane_angle(
                             right_detected,
                         );
 
-                        let steering_angle = if lane_task_config.use_kalman {
-                            pipeline.update_angle_kalman(detected_angle)
-                        } else {
-                            detected_angle
-                        };
+                        let lateral_offset = pipeline
+                            .estimate_lateral_offset(
+                                &left_fitx,
+                                &right_fitx,
+                                left_detected,
+                                right_detected,
+                            )
+                            .unwrap_or(last_offset);
+
+                        let steering_angle = detected_angle;
 
                         let birds_eye_arc = Arc::new(birds_eye_visual);
                         last_birds_eye = Some(birds_eye_arc.clone());
-                        (birds_eye_arc, steering_angle)
+                        (birds_eye_arc, steering_angle, lateral_offset)
                     } else {
                         let birds_eye_arc = last_birds_eye
                             .as_ref()
                             .expect("birds-eye cache missing")
                             .clone();
                         let steering_angle = last_angle;
-                        (birds_eye_arc, steering_angle)
+                        let lateral_offset = last_offset;
+                        (birds_eye_arc, steering_angle, lateral_offset)
                     };
                     last_angle = steering_angle;
+                    last_offset = lateral_offset;
 
                     // 차선 각도와 버드아이 영상 결과를 각각 전송한다.
-                    let lane_angle_dto = Arc::new(DtoCamLaneAngle::new(steering_angle, alive_cnt));
+                    let lane_angle_dto = Arc::new(DtoCamLaneAngle::new(
+                        steering_angle,
+                        lateral_offset,
+                        alive_cnt,
+                    ));
                     let _ = lane_angle_tx.send(lane_angle_dto);
 
                     let birds_eye_view_dto = Arc::new(DtoCamBirdEyeView::new(

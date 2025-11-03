@@ -90,13 +90,18 @@ impl DtoCamProcessed {
 /// 차선 각도(조향각) 값과 alive 카운터.
 pub struct DtoCamLaneAngle {
     pub angle: f64,
+    pub lateral_offset: f64,
     pub alive_cnt: u32,
 }
 
 impl DtoCamLaneAngle {
     /// 새 차선 각도 DTO를 생성한다.
-    pub fn new(angle: f64, alive_cnt: u32) -> Self {
-        Self { angle, alive_cnt }
+    pub fn new(angle: f64, lateral_offset: f64, alive_cnt: u32) -> Self {
+        Self {
+            angle,
+            lateral_offset,
+            alive_cnt,
+        }
     }
 }
 
@@ -391,6 +396,124 @@ impl DtoLocalizationArrival {
             alive_cnt,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+/// 경로 계획에서 활용하는 단일 waypoint DTO.
+pub struct DtoPathWaypoint {
+    pub lane: LocalizationLane,
+    pub index: u32,
+    pub position_xy: [f32; 2],
+    pub can_change_lane: bool,
+}
+
+impl DtoPathWaypoint {
+    pub fn new(
+        lane: LocalizationLane,
+        index: u32,
+        position_xy: [f32; 2],
+        can_change_lane: bool,
+    ) -> Self {
+        Self {
+            lane,
+            index,
+            position_xy,
+            can_change_lane,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+/// 전역 경로(출발부터 목적지까지 waypoint 시퀀스)를 전파하는 DTO.
+pub struct DtoAdasGlobalPath {
+    pub map_id: LocalizationMapId,
+    pub waypoints: Vec<DtoPathWaypoint>,
+    pub alive_cnt: u32,
+    pub generated_time_ns: u64,
+}
+
+impl DtoAdasGlobalPath {
+    pub fn new(
+        map_id: LocalizationMapId,
+        waypoints: Vec<DtoPathWaypoint>,
+        alive_cnt: u32,
+        generated_time_ns: u64,
+    ) -> Self {
+        Self {
+            map_id,
+            waypoints,
+            alive_cnt,
+            generated_time_ns,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+/// 전역 경로에서 추출한 단기 추종용 waypoint 집합.
+pub struct DtoAdasLocalPath {
+    pub map_id: LocalizationMapId,
+    pub origin_alive_cnt: u32,
+    pub waypoints: Vec<DtoPathWaypoint>,
+    pub alive_cnt: u32,
+    pub generated_time_ns: u64,
+}
+
+impl DtoAdasLocalPath {
+    pub fn new(
+        map_id: LocalizationMapId,
+        origin_alive_cnt: u32,
+        waypoints: Vec<DtoPathWaypoint>,
+        alive_cnt: u32,
+        generated_time_ns: u64,
+    ) -> Self {
+        Self {
+            map_id,
+            origin_alive_cnt,
+            waypoints,
+            alive_cnt,
+            generated_time_ns,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+/// 스무딩된 단기 추종 궤적 샘플.
+pub struct DtoAdasSmoothedPath {
+    pub map_id: LocalizationMapId,
+    pub origin_alive_cnt: u32,
+    pub samples_xy: Vec<[f32; 2]>,
+    pub alive_cnt: u32,
+    pub generated_time_ns: u64,
+    pub lane_change_state: AdasLaneChangeState,
+}
+
+impl DtoAdasSmoothedPath {
+    pub fn new(
+        map_id: LocalizationMapId,
+        origin_alive_cnt: u32,
+        samples_xy: Vec<[f32; 2]>,
+        alive_cnt: u32,
+        generated_time_ns: u64,
+        lane_change_state: AdasLaneChangeState,
+    ) -> Self {
+        Self {
+            map_id,
+            origin_alive_cnt,
+            samples_xy,
+            alive_cnt,
+            generated_time_ns,
+            lane_change_state,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+/// 차선 변경 상태.
+pub enum AdasLaneChangeState {
+    InnerCruise,
+    OuterCruise,
+    InnerToOuter,
+    OuterToInner,
 }
 
 #[derive(Debug, Clone)]

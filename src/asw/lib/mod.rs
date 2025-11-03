@@ -2,6 +2,7 @@
 //! 알고리즘 구현을 독립적으로 캡슐화해 러너블에서 재사용한다.
 
 pub mod adas_localization_lib;
+pub mod adas_path_lib;
 pub mod forwardcollision_ultrasonic_lib;
 pub mod vs_lane_lib;
 pub mod vs_trafficlight_lib;

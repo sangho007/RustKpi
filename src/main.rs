@@ -175,6 +175,38 @@ async fn main() -> opencv::Result<()> {
         }));
     }
 
+    // ASW Arrival Detection Task
+    {
+        let chans = channels.clone();
+        tasks.push(tokio::spawn(async move {
+            asw::adas_localization::runnable_adas_arrival("ADAS-Arrival", chans).await;
+        }));
+    }
+
+    // ASW Global Path Task
+    {
+        let chans = channels.clone();
+        tasks.push(tokio::spawn(async move {
+            asw::adas_path_global::runnable_adas_path_global("ADAS-Path-Global", chans).await;
+        }));
+    }
+
+    // ASW Local Path Task
+    {
+        let chans = channels.clone();
+        tasks.push(tokio::spawn(async move {
+            asw::adas_path_local::runnable_adas_path_local("ADAS-Path-Local", chans).await;
+        }));
+    }
+
+    // ASW Local Path Smoothing Task
+    {
+        let chans = channels.clone();
+        tasks.push(tokio::spawn(async move {
+            asw::adas_path_local::runnable_adas_path_smoothing("ADAS-Path-Smooth", chans).await;
+        }));
+    }
+
     // ADAS Lateral Control Task
     {
         let chans = channels.clone();

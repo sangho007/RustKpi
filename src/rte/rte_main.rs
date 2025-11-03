@@ -2,9 +2,10 @@
 //! 각 ECU/ASW 태스크가 사용할 브로드캐스트 송신자를 생성한다.
 
 use crate::rte::rte_dto::{
-    DtoCamBirdEyeView, DtoCamLaneAngle, DtoCamProcessed, DtoCamRaw, DtoDcMotorCtrl, DtoImu,
-    DtoLocalizationArrival, DtoLocalizationState, DtoServoCtrl, DtoTcpTelemetry, DtoTrafficLight,
-    DtoTrafficLightDirective, DtoUltraSonicObstacle, DtoUltraSonicRaw,
+    DtoAdasGlobalPath, DtoAdasLocalPath, DtoAdasSmoothedPath, DtoCamBirdEyeView, DtoCamLaneAngle,
+    DtoCamProcessed, DtoCamRaw, DtoDcMotorCtrl, DtoImu, DtoLocalizationArrival,
+    DtoLocalizationState, DtoServoCtrl, DtoTcpTelemetry, DtoTrafficLight, DtoTrafficLightDirective,
+    DtoUltraSonicObstacle, DtoUltraSonicRaw,
 };
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -23,6 +24,9 @@ pub type TcpRawSender = broadcast::Sender<Arc<DtoTcpTelemetry>>;
 pub type ImuParsedSender = broadcast::Sender<Arc<DtoImu>>;
 pub type LocalizationStateSender = broadcast::Sender<Arc<DtoLocalizationState>>;
 pub type LocalizationArrivalSender = broadcast::Sender<Arc<DtoLocalizationArrival>>;
+pub type GlobalPathSender = broadcast::Sender<Arc<DtoAdasGlobalPath>>;
+pub type LocalPathSender = broadcast::Sender<Arc<DtoAdasLocalPath>>;
+pub type SmoothedPathSender = broadcast::Sender<Arc<DtoAdasSmoothedPath>>;
 
 const CAM_RAW_CAPACITY: usize = 2;
 const CAM_PROCESSED_CAPACITY: usize = 6;
@@ -38,6 +42,9 @@ const TCP_RAW_CAPACITY: usize = 16;
 const IMU_PARSED_CAPACITY: usize = 16;
 const LOCALIZATION_STATE_CAPACITY: usize = 16;
 const LOCALIZATION_ARRIVAL_CAPACITY: usize = 8;
+const PATH_GLOBAL_CAPACITY: usize = 4;
+const PATH_LOCAL_CAPACITY: usize = 8;
+const PATH_SMOOTHED_CAPACITY: usize = 8;
 
 #[derive(Clone)]
 /// 카메라 처리 파이프라인에 필요한 브로드캐스트 송신자 묶음.
@@ -85,6 +92,14 @@ pub struct LocalizationChannels {
 }
 
 #[derive(Clone)]
+/// 경로 계획 결과 채널.
+pub struct PathChannels {
+    pub global_tx: GlobalPathSender,
+    pub local_tx: LocalPathSender,
+    pub smoothed_tx: SmoothedPathSender,
+}
+
+#[derive(Clone)]
 /// 전체 RTE 채널 묶음.
 pub struct RteChannels {
     pub camera: CameraChannels,
@@ -93,6 +108,7 @@ pub struct RteChannels {
     pub com: TcpChannels,
     pub imu: ImuChannels,
     pub localization: LocalizationChannels,
+    pub path: PathChannels,
 }
 
 /// RTE 시스템 초기화 결과.
@@ -118,6 +134,9 @@ pub fn init() -> RteSystem {
     let (imu_parsed_tx, _) = broadcast::channel(IMU_PARSED_CAPACITY);
     let (localization_state_tx, _) = broadcast::channel(LOCALIZATION_STATE_CAPACITY);
     let (localization_arrival_tx, _) = broadcast::channel(LOCALIZATION_ARRIVAL_CAPACITY);
+    let (path_global_tx, _) = broadcast::channel(PATH_GLOBAL_CAPACITY);
+    let (path_local_tx, _) = broadcast::channel(PATH_LOCAL_CAPACITY);
+    let (path_smoothed_tx, _) = broadcast::channel(PATH_SMOOTHED_CAPACITY);
 
     let camera = CameraChannels {
         raw_tx: cam_raw_tx,
@@ -148,6 +167,11 @@ pub fn init() -> RteSystem {
         state_tx: localization_state_tx,
         arrival_tx: localization_arrival_tx,
     };
+    let path = PathChannels {
+        global_tx: path_global_tx,
+        local_tx: path_local_tx,
+        smoothed_tx: path_smoothed_tx,
+    };
 
     RteSystem {
         channels: RteChannels {
@@ -157,6 +181,7 @@ pub fn init() -> RteSystem {
             com,
             imu,
             localization,
+            path,
         },
     }
 }

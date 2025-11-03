@@ -1184,6 +1184,24 @@ impl Pipeline {
         steering_angle
     }
 
+    pub(crate) fn estimate_lateral_offset(
+        &self,
+        left_fitx: &[f64],
+        right_fitx: &[f64],
+        left_detected: bool,
+        right_detected: bool,
+    ) -> Option<f64> {
+        if left_detected && right_detected && !left_fitx.is_empty() && !right_fitx.is_empty() {
+            let left = *left_fitx.last().unwrap();
+            let right = *right_fitx.last().unwrap();
+            let lane_center = (left + right) * 0.5;
+            let image_center = self.width as f64 * 0.5;
+            Some(lane_center - image_center)
+        } else {
+            None
+        }
+    }
+
     /// 1차원 칼만 필터로 조향각 측정값을 평활화합니다.
     ///
     /// # Arguments
