@@ -51,7 +51,7 @@ async fn wait_for_ev_ready(
     }
 }
 
-/// 애플리케이션의 비동기 메인 진입점으로 각 ECU 및 ASW 작업을 실행한다.
+/// 애플리케이션의 비동기 메인 진입점으로 각 BSW 및 ASW 작업을 실행한다.
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> opencv::Result<()> {
     // OpenCL 가속을 초기화해 영상 처리 성능을 확보한다.
