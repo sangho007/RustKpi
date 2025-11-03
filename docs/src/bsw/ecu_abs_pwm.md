@@ -1,4 +1,4 @@
-# ecu_abs_pwm.rs - ECU Abstraction (PCA9685 Actuator)
+# ecu_abs_pwm.rs — ECU Abstraction (PCA9685 Actuator)
 
 - 경로: `src/bsw/ecu_abs_pwm.rs`
 - 계층: BSW / ECU Abstraction (Actuator)

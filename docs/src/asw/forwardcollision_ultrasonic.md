@@ -1,4 +1,4 @@
-# forwardcollision_ultrasonic.rs - 전방 초음파 장애물 감지
+# forwardcollision_ultrasonic.rs — 전방 초음파 장애물 감지
 
 - 경로: `src/asw/forwardcollision_ultrasonic.rs`
 - 계층: ASW / Ultrasonic → Obstacle

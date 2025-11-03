@@ -40,6 +40,8 @@ pub struct AdasPathGlobalCalibration {
     pub obstacle_block_margin_m: f32,
     /// 차단된 waypoint를 유지할 시간.
     pub obstacle_block_timeout: Duration,
+    /// 장애물 차단 시 차량 헤딩과 비교할 허용 각도(도 단위).
+    pub obstacle_block_heading_tolerance_deg: f32,
 }
 
 impl Default for AdasPathGlobalCalibration {
@@ -62,6 +64,7 @@ impl Default for AdasPathGlobalCalibration {
             lane_change_retry_cooldown: Duration::from_millis(500),
             obstacle_block_margin_m: 0.2,
             obstacle_block_timeout: Duration::from_secs(2),
+            obstacle_block_heading_tolerance_deg: 10.0,
         }
     }
 }

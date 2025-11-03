@@ -1,4 +1,4 @@
-# ecu_abs_cam.rs - ECU Abstraction (Camera)
+# ecu_abs_cam.rs — ECU Abstraction (Camera)
 
 - 경로: `src/bsw/ecu_abs_cam.rs`
 - 계층: BSW / ECU Abstraction (Camera)

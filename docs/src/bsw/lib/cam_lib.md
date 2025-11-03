@@ -1,9 +1,13 @@
-# cam_lib.rs - 카메라 캡처 추상화
+# cam_lib.rs — 카메라 캡처 추상화
 
 - 경로: `src/bsw/lib/cam_lib.rs`
 - 계층: BSW / 라이브러리
 
-## 핵심 개념
+## 목적
+- 카메라 캡처 백엔드를 통합 인터페이스로 추상화해 BSW 카메라 러너블이 동일한 데이터 경로를 사용할 수 있게 합니다.
+- 버퍼 재활용과 stride/색상 정보를 함께 전파해 ASW 단계에서 안전하게 OpenCV `Mat` 뷰를 구성할 수 있도록 돕습니다.
+
+## 주요 개념
 - `CapturedFrame`: `CameraBuffer`(픽셀 데이터), 해상도, stride, bytes_per_pixel, `ColorFormat` 메타데이터를 포함한 구조체. `Arc`로 공유해 다운스트림 복사를 피합니다.
 - `CameraBuffer`: `rte::lib::camera_lib`에 정의되어 있으며, 선택적으로 `BufferRecycler`를 붙여 libcamera 풀 메모리를 재활용할 수 있는 버퍼 래퍼.
 - `FrameCapture` 트레이트: `read_frame(&mut self) -> Result<Option<CapturedFrame>>` 인터페이스로 다양한 캡처 백엔드를 통일합니다.

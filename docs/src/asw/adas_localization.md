@@ -4,14 +4,32 @@
 - 계층: ASW / ADAS Localization
 
 ## 목적
-IMU로부터 수신한 자세·위치 텔레메트리를 `adas_localization_lib`의 헬퍼와 결합해 현재 차량의 XY 좌표와 yaw 를 추정하고, `DtoLocalizationState`를 RTE 채널로 브로드캐스트합니다.
+IMU 텔레메트리를 누적해 차량의 현재 위치와 yaw 를 추정하고(`DtoLocalizationState`), 도착지 근접 여부를 판단하는 `DtoLocalizationArrival`을 별도로 브로드캐스트합니다. 지도 JSON과 시나리오 캘리브레이션을 바탕으로 좌표계를 구성합니다.
 
-## 주요 흐름
-- `LOCALIZATION_ACTIVE_SCENARIO`에서 선택된 지도 JSON과 출발 지점을 로드해 기본 좌표계를 결정합니다.
-- IMU broadcast 채널을 구독하여 최신 샘플만 남기고 나머지는 버려 지연을 최소화합니다.
-- 각 샘플마다 `process_imu_sample` 호출로 누적 변위를 계산하고 yaw 축을 추정한 뒤 localization 채널에 전파합니다.
+## 구성 러너블
+### `runnable_adas_localization("ADAS-Localization", RteChannels)`
+- **입력**: `imu.parsed_tx`
+- **프로시저**
+  1. `LOCALIZATION_ACTIVE_SCENARIO`에서 지도와 시작 waypoint 를 읽어와 기준 좌표계를 설정합니다.
+  2. IMU 브로드캐스트를 구독하고, `try_recv`로 큐를 비워 최신 샘플만 사용합니다.
+  3. `adas_localization_lib::process_imu_sample`을 호출해 기준점 보정, 프레임 변환, yaw 축 판별, 이동 거리 누적을 수행하고 `DtoLocalizationState`를 생성합니다.
+  4. 성공 시 `localization.state_tx`로 상태를 브로드캐스트하고, 오류는 경고 로그로 남깁니다.
+- **출력**: `DtoLocalizationState` (위치, yaw, 헤딩, alive 카운터 포함)
+
+### `runnable_adas_arrival("ADAS-Arrival", RteChannels)`
+- **입력**: `localization.state_tx`
+- **프로시저**
+  1. 동일한 시나리오 맵에서 목적지 waypoint를 찾고, 임계 거리(`LOCALIZATION_ARRIVAL_THRESHOLD_M`)를 계산합니다.
+  2. 최신 Localization 상태만 유지하며, 차량이 임계 거리 안으로 들어오면 도착 이벤트를 `DtoLocalizationArrival`로 브로드캐스트합니다.
+  3. 차량이 다시 멀어지면 재무장을 위해 도착 플래그를 해제합니다.
+- **출력**: `DtoLocalizationArrival { arrived, distance_m, timestamp_ns, alive_cnt }`
 
 ## 오류 처리
-- 지도 파일 로딩 실패나 잘못된 시작 waypoint는 즉시 로그를 남기고 실행을 중단합니다.
-- IMU 채널 지연(`Lagged`) 및 종료(`Closed`) 상황을 감지해 운영자에게 알리고, 종료 시 러너블을 정리합니다.
+- 지도 파일 로딩 실패나 잘못된 waypoint는 즉시 로그를 남기고 러너블 실행을 중단합니다.
+- IMU/Localization 채널이 `Lagged`일 때는 누락 개수를 경고만 출력하고 최신 샘플로 복구합니다.
+- 채널이 `Closed`되면 원인을 알리고 루프를 종료합니다.
 
+## 연관 모듈
+- `asw::lib::adas_localization_lib`: 지도 파싱(`MapData`), yaw 축 결정, IMU 누적 로직을 제공합니다.
+- `calibration::adas_localization`: 맵/시작/도착 waypoint, 임계 거리, 시나리오 선택 상수를 정의합니다.
+- `main_runtime`: Path View에서 `DtoLocalizationState`를 참조해 현재 위치와 헤딩을 표시합니다.

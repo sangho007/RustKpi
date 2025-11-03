@@ -1,9 +1,13 @@
-# vs_trafficlight_lib.rs - 신호등 인지 파이프라인
+# vs_trafficlight_lib.rs — 신호등 인지 파이프라인
 
 - 경로: `src/asw/lib/vs_trafficlight_lib.rs`
 - 계층: ASW / 라이브러리 (Vision)
 
-## 핵심 타입
+## 목적
+- 신호등 감지에 필요한 전처리/클러스터링 파이프라인을 재사용 가능한 구조체로 제공해 러너블이 고수준 상태 머신에 집중하도록 합니다.
+- 캘리브레이션에서 정의한 ROI·HSV·DBSCAN 파라미터를 일관되게 적용해 환경 변화에 빠르게 대응합니다.
+
+## 주요 타입
 - `TrafficLightColor` 열거형: `Red`, `Yellow`, `Green`, `Off`
 - `Pipeline`: ROI 다각형, 색상별 HSV 임계값, 모폴로지/DBSCAN 파라미터, 최근 판정 상태를 보존합니다. `TrafficLightCalibration`을 입력으로 생성됩니다.
 

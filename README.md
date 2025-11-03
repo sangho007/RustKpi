@@ -111,7 +111,7 @@ Broadcast 채널을 활용하여 각 Task가 비동기적으로 데이터를 주
 - USB/TCP IMU Gateway (`src/bsw/ecu_abs_com.rs`): iPhone ARKit 텔레메트리를 TCP 길이 프레이밍으로 수신하고 RTE 브로드캐스트로 배포합니다.
 - IMU Protobuf Decoder (`src/bsw/ecu_abs_imu.rs`, `src/bsw/lib/imu_proto.rs`): Swift 앱이 보낸 protobuf payload를 파싱해 `DtoImu`로 변환하고 오일러 각까지 계산합니다.
 - ADAS 제어 러너블 (`src/asw/adas_cod.rs`): 차선 각도를 비례 + 레이트 제한으로 서보에 반영하고, 초음파·신호등·거리 임계값에 따라 정지/감속/순항 상태 머신으로 DC 모터를 제어합니다.
-- 런타임/프리뷰 (`src/main_runtime.rs`, `src/util/preview_*`): SDL2 기반 다중 창 프리뷰(ESC/창 닫기 종료).
+- 런타임/프리뷰 (`src/main_runtime.rs`, `src/util/preview_*`): SDL2 기반 다중 창 프리뷰(ESC/창 닫기 종료, `R`/`P`/`B`/`M` 키로 Raw/Processed/Bird/Path 창 토글).
 
 ### 카메라 해상도 & 캡처 모드
 - 기본 해상도는 VGA 640×480(`LaneCalibrationPreset::Vga640x480`)입니다.
@@ -147,7 +147,7 @@ python tools/resize_video.py --input video/challenge.mp4 \
 ## 실행 방법
 - 데스크톱(샘플 비디오) 기본 실행:
   - `cargo run --release`
-  - SDL2 프리뷰 창이 뜨며 ESC 또는 창 닫기로 종료합니다.
+  - SDL2 프리뷰 창이 뜨며 ESC 또는 창 닫기로 종료합니다. `M` 키를 누르면 전역/로컬 경로와 현재 위치를 중첩해서 보여주는 Path View를 켜고 끌 수 있습니다(기본 주기 200ms).
 - 실제 카메라(libcamera) 사용:
   - 캡처 모드는 `CameraCalibration::default().use_libcamera`에 의해 결정됩니다(현재 기본 false).
   - 필요 시 코드의 기본값(또는 HD 프리셋)에서 `use_libcamera = true`로 전환하세요.

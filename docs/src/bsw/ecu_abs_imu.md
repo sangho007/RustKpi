@@ -1,4 +1,4 @@
-# ecu_abs_imu.rs - IMU 텔레메트리 파서
+# ecu_abs_imu.rs — IMU 텔레메트리 파서
 
 - 경로: `src/bsw/ecu_abs_imu.rs`
 - 계층: BSW / ECU Abstraction (IMU)

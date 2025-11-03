@@ -1,4 +1,4 @@
-# main.rs - 시스템 오케스트레이터
+# main.rs — 시스템 오케스트레이터
 
 - 경로: `src/main.rs`
 - 계층: 엔트리포인트 / 통합 실행
@@ -26,11 +26,14 @@ Tokio 멀티스레드 런타임을 초기화하고 RTE 채널, BSW 디바이스 
   - `asw::vs_lane::runnable_vs_get_lane_angle`: 버드아이 뷰와 조향각(`DtoCamBirdEyeView`, `DtoCamLaneAngle`)을 계산합니다.
   - `asw::vs_trafficlight::runnable_vs_detect_trafficlight`: Localization 감지 구간에서만 HSV + DBSCAN으로 신호등 색(`DtoTrafficLight`)을 판정하고, 정지/가속 요청(`DtoTrafficLightDirective`)을 브로드캐스트합니다.
   - `asw::forwardcollision_ultrasonic::runnable_forwardcollision_obstacle_detection`: 초음파 거리와 `ForwardCollisionCalibration` 임계값으로 정지/차선 변경 요청(`DtoUltraSonicObstacle`)을 퍼블리시합니다.
-  - `asw::adas_cod::runnable_adas_lateral`: LaneAngle에 비례 제어를 적용해 서보 명령을 결정합니다.
-  - `asw::adas_cod::runnable_adas_longitudinal`: 초음파/신호등/IMU 텔레메트리를 활용해 DC 모터 속도를 결정합니다.
+  - `asw::adas_localization::runnable_adas_localization` & `runnable_adas_arrival`: IMU 텔레메트리로 차량 위치/헤딩을 추정하고 도착 여부를 브로드캐스트합니다.
+  - `asw::adas_path_global::runnable_adas_path_global`: 지도 그래프를 이용해 현재 위치에서 목적지까지 전역 경로를 지속적으로 재계획합니다.
+  - `asw::adas_path_local::{runnable_adas_path_local, runnable_adas_path_smoothing}`: 전역 경로를 잘라 로컬 경로를 만들고 5차 다항식 스무딩으로 제어용 궤적을 생성합니다.
+  - `asw::adas_cod::runnable_adas_lateral`: 스무딩 경로 곡률과 LaneAngle, 횡방향 오차를 고려해 서보 명령을 결정합니다.
+  - `asw::adas_cod::runnable_adas_longitudinal`: 초음파/신호등/경로 준비 상태를 통합해 DC 모터 속도를 결정하고, 가속·감속 레이트 리밋을 적용합니다.
 
 ## 런타임/종료 제어
-- `main_runtime::run`이 GUI 프리뷰 스레드(`util::preview_runtime`)를 조건부로 띄우고, 최신 프레임과 센서 데이터를 구독해 화면 출력 및 로그를 수행합니다.
+- `main_runtime::run`이 GUI 프리뷰 스레드(`util::preview_runtime`)를 조건부로 띄우고, 최신 프레임과 센서/경로 데이터를 구독해 화면 출력 및 로그를 수행합니다.
 - Ctrl-C 또는 GUI quit 이벤트를 감지하면 루프를 빠져나가고, 스폰된 모든 태스크를 정리한 뒤 OpenCV `Result`에 따라 프로세스 종료 코드를 선택합니다.
 
 ## 동시성 및 장애 대응

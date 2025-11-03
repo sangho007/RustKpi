@@ -1,4 +1,4 @@
-# vs_trafficlight.rs - 신호등 인지 태스크
+# vs_trafficlight.rs — 신호등 인지 태스크
 
 - 경로: `src/asw/vs_trafficlight.rs`
 - 계층: ASW / Vision (Traffic Light)

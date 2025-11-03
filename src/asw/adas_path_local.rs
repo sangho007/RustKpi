@@ -23,7 +23,7 @@ pub async fn runnable_adas_path_local(id: &'static str, channels: RteChannels) {
     let local_tx = channels.path.local_tx.clone();
 
     let mut latest_global: Option<Arc<DtoAdasGlobalPath>> = None;
-    let mut latest_state: Option<DtoLocalizationState> = None;
+    let mut latest_state: Option<Arc<DtoLocalizationState>> = None;
     let mut alive_cnt: u32 = 0;
     let mut last_log = Instant::now();
 
@@ -43,7 +43,7 @@ pub async fn runnable_adas_path_local(id: &'static str, channels: RteChannels) {
                             &calib,
                             &local_tx,
                             latest_global.as_ref(),
-                            latest_state.as_ref(),
+                            latest_state.as_deref(),
                             &mut alive_cnt,
                             &mut last_log,
                         );
@@ -64,13 +64,13 @@ pub async fn runnable_adas_path_local(id: &'static str, channels: RteChannels) {
                         while let Ok(newer) = localization_rx.try_recv() {
                             newest = newer;
                         }
-                        latest_state = Some(newest.as_ref().clone());
+                        latest_state = Some(newest);
                         try_publish_local_path(
                             id,
                             &calib,
                             &local_tx,
                             latest_global.as_ref(),
-                            latest_state.as_ref(),
+                            latest_state.as_deref(),
                             &mut alive_cnt,
                             &mut last_log,
                         );
@@ -97,7 +97,7 @@ pub async fn runnable_adas_path_smoothing(id: &'static str, channels: RteChannel
     let smooth_tx = channels.path.smoothed_tx.clone();
 
     let mut latest_local: Option<Arc<DtoAdasLocalPath>> = None;
-    let mut latest_state: Option<DtoLocalizationState> = None;
+    let mut latest_state: Option<Arc<DtoLocalizationState>> = None;
     let mut alive_cnt: u32 = 0;
     let mut last_log = Instant::now();
 
@@ -117,7 +117,7 @@ pub async fn runnable_adas_path_smoothing(id: &'static str, channels: RteChannel
                             &calib,
                             &smooth_tx,
                             latest_local.as_ref(),
-                            latest_state.as_ref(),
+                            latest_state.as_deref(),
                             &mut alive_cnt,
                             &mut last_log,
                         );
@@ -138,13 +138,13 @@ pub async fn runnable_adas_path_smoothing(id: &'static str, channels: RteChannel
                         while let Ok(newer) = localization_rx.try_recv() {
                             newest = newer;
                         }
-                        latest_state = Some(newest.as_ref().clone());
+                        latest_state = Some(newest);
                         try_publish_smoothed_path(
                             id,
                             &calib,
                             &smooth_tx,
                             latest_local.as_ref(),
-                            latest_state.as_ref(),
+                            latest_state.as_deref(),
                             &mut alive_cnt,
                             &mut last_log,
                         );

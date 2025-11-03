@@ -1,4 +1,4 @@
-# ecu_abs_ultrasonic.rs - ECU Abstraction (Ultrasonic)
+# ecu_abs_ultrasonic.rs — ECU Abstraction (Ultrasonic)
 
 - 경로: `src/bsw/ecu_abs_ultrasonic.rs`
 - 계층: BSW / ECU Abstraction (Ultrasonic)

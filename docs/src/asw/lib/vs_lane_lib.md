@@ -1,13 +1,17 @@
-# vs_lane_lib.rs - 차선 인식 파이프라인 라이브러리
+# vs_lane_lib.rs — 차선 인식 파이프라인 라이브러리
 
 - 경로: `src/asw/lib/vs_lane_lib.rs`
 - 계층: ASW / 라이브러리 (Vision)
 
-## 핵심 타입
+## 목적
+- 차선 인식 파이프라인에서 반복 사용하는 전처리·탐색·평활화 루틴을 묶어 러너블이 간결한 고수준 흐름에 집중하도록 합니다.
+- 캘리브레이션/프리셋 기반으로 ROI, 투시 변환, 필터 파라미터를 초기화해 다양한 해상도에서도 일관된 결과를 제공합니다.
+
+## 주요 타입
 - `Pipeline`: 차선 인식에 필요한 ROI, 투시 변환 행렬, 슬라이딩 윈도우/칼만 필터 상태, 최근 차선 계수 이력 등을 보관합니다. `LaneCalibration::preset`에서 파생된 파라미터로 초기화됩니다.
 - `LaneTaskConfig { use_kalman: bool }`: 런타임에서 칼만 필터 사용 여부를 전달하기 위한 간단한 설정 구조체.
 
-## 생성
+## 초기화
 - `Pipeline::new_with_settings(use_kalman)`:
   - `LaneCalibration::preset(LaneCalibrationPreset::Vga640x480)`을 불러 카메라 해상도, ROI 다각형, 투시 변환 행렬, 필터링/모폴로지/슬라이딩 윈도우 설정을 복사합니다.
   - 칼만 필터 파라미터(초기 추정, 공분산, 노이즈)와 슬라이딩 윈도우 디스플레이/탐색 폭을 세팅합니다.

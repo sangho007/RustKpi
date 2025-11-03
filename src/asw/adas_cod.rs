@@ -30,7 +30,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
 
     // 최신 신호 캐시
     let mut latest_lane: Option<DtoCamLaneAngle> = None;
-    let mut latest_path: Option<DtoAdasSmoothedPath> = None;
+    let mut latest_path: Option<Arc<DtoAdasSmoothedPath>> = None;
     let mut last_cmd_deg: u32 = calib.servo_neutral_deg;
     let mut last_log: Instant = Instant::now();
 
@@ -53,10 +53,11 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
 
         match path_rx.try_recv() {
             Ok(dto) => {
-                latest_path = Some(dto.as_ref().clone());
+                let mut newest = dto;
                 while let Ok(newer) = path_rx.try_recv() {
-                    latest_path = Some(newer.as_ref().clone());
+                    newest = newer;
                 }
+                latest_path = Some(newest);
             }
             Err(TryRecvError::Lagged(n)) => {
                 eprintln!("[{}] ADAS lateral smoothed_path lagged by {}", id, n);
@@ -67,9 +68,11 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
         // 제어 주기 동기화
         tick.tick().await;
 
-        let lane_state = latest_path.as_ref().map(|path| path.lane_change_state);
+        let lane_state = latest_path
+            .as_deref()
+            .map(|path| path.lane_change_state);
 
-        let curvature = if let Some(path) = latest_path.as_ref() {
+        let curvature = if let Some(path) = latest_path.as_deref() {
             match curvature_from_smoothed_path(path) {
                 Ok(value) => value,
                 Err(err) => {
@@ -185,10 +188,10 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
 
     // 가장 최근의 센싱 정보를 보관해 제어 주기마다 활용한다.
     let mut latest_distance: Option<DtoUltraSonicRaw> = None;
-    let mut latest_obstacle: Option<DtoUltraSonicObstacle> = None;
+    let mut latest_obstacle: Option<Arc<DtoUltraSonicObstacle>> = None;
     let mut latest_signal: Option<DtoTrafficLight> = None;
-    let mut latest_directive: Option<DtoTrafficLightDirective> = None;
-    let mut latest_path: Option<DtoAdasSmoothedPath> = None;
+    let mut latest_directive: Option<Arc<DtoTrafficLightDirective>> = None;
+    let mut latest_path: Option<Arc<DtoAdasSmoothedPath>> = None;
     let mut last_cmd: Option<(u32, u32)> = None;
     let mut alive_cnt: u32 = 0;
     let mut last_log = Instant::now();
@@ -214,10 +217,11 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
         // 장애물 판별 결과 확인
         match obstacle_rx.try_recv() {
             Ok(dto) => {
-                latest_obstacle = Some(dto.as_ref().clone());
+                let mut newest = dto;
                 while let Ok(newer) = obstacle_rx.try_recv() {
-                    latest_obstacle = Some(newer.as_ref().clone());
+                    newest = newer;
                 }
+                latest_obstacle = Some(newest);
             }
             Err(TryRecvError::Lagged(n)) => {
                 eprintln!("[{}] ADAS longitudinal obstacle lagged by {}", id, n);
@@ -240,10 +244,11 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
         }
         match traffic_directive_rx.try_recv() {
             Ok(dto) => {
-                latest_directive = Some(dto.as_ref().clone());
+                let mut newest = dto;
                 while let Ok(newer) = traffic_directive_rx.try_recv() {
-                    latest_directive = Some(newer.as_ref().clone());
+                    newest = newer;
                 }
+                latest_directive = Some(newest);
             }
             Err(TryRecvError::Lagged(n)) => {
                 eprintln!(
@@ -255,10 +260,11 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
         }
         match path_rx.try_recv() {
             Ok(dto) => {
-                latest_path = Some(dto.as_ref().clone());
+                let mut newest = dto;
                 while let Ok(newer) = path_rx.try_recv() {
-                    latest_path = Some(newer.as_ref().clone());
+                    newest = newer;
                 }
+                latest_path = Some(newest);
             }
             Err(TryRecvError::Lagged(n)) => {
                 eprintln!("[{}] ADAS longitudinal smoothed_path lagged by {}", id, n);
@@ -270,7 +276,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
 
         // 가장 최근 거리 값과 임계치 비교
         let distance_cm = latest_obstacle
-            .as_ref()
+            .as_deref()
             .map(|o| o.distance_cm)
             .or_else(|| latest_distance.as_ref().map(|d| d.distance));
         let distance_state = match distance_cm {
@@ -280,17 +286,17 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             ),
             None => (true, true),
         };
-        let obstacle_status = latest_obstacle.as_ref();
+        let obstacle_status = latest_obstacle.as_deref();
         let stop_requested_obstacle = obstacle_status.map(|d| d.stop_requested).unwrap_or(false);
         let stop_requested_signal = latest_directive
-            .as_ref()
+            .as_deref()
             .map(|d| d.stop_requested && d.inside_detection_zone)
             .unwrap_or(false);
         let lane_change_requested = obstacle_status
             .map(|d| d.lane_change_requested)
             .unwrap_or(false);
         let accelerate_requested = latest_directive
-            .as_ref()
+            .as_deref()
             .map(|d| d.accelerate_requested && d.inside_detection_zone)
             .unwrap_or(false);
         let traffic_color = latest_signal
@@ -313,13 +319,13 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
         };
 
         let path_ready = latest_path
-            .as_ref()
+            .as_deref()
             .map(|path| !path.samples_xy.is_empty())
             .unwrap_or(false);
         let gating_stop = !path_ready;
 
         let curvature_abs = latest_path
-            .as_ref()
+            .as_deref()
             .and_then(|path| curvature_from_smoothed_path(path).ok())
             .map(|curv| curv.abs())
             .unwrap_or(0.0);

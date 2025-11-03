@@ -1,10 +1,13 @@
-
-# ecu_abs_com.rs - USB/TCP 텔레메트리 게이트웨이
+# ecu_abs_com.rs — USB/TCP 텔레메트리 게이트웨이
 
 - 경로: `src/bsw/ecu_abs_com.rs`
 - 계층: BSW / ECU Abstraction (Communication)
 
-## 러너블 개요
+## 목적
+- USB로 유입되는 iPhone 텔레메트리를 TCP 게이트웨이로 수신해 RTE `TcpChannels.telemetry_tx`에 전파합니다.
+- PC 측에서 protobuf 바이트 스트림을 수신·검증하고 IMU 파이프라인으로 전달할 수 있도록 길이 헤더, alive 카운터 등 전송 규칙을 강제합니다.
+
+## 구성 러너블
 - `ComCalibration::default()`에서 바인드할 호스트/포트와 최대 페이로드 크기를 읽어옵니다.
 - `TcpListener::bind`로 IMU 송신기(iPhone ↔ usbmuxd 터널)를 기다리고, 연결 하나마다 `stream_telemetry`를 `tokio::spawn`으로 실행합니다.
 - 각 연결은 길이 헤더(4바이트 BE) + payload를 읽어 `DtoTcpTelemetry`로 패키징하고 `TcpChannels.telemetry_tx`에 브로드캐스트합니다.

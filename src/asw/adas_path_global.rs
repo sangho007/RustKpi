@@ -17,6 +17,9 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
     let calib = AdasPathGlobalCalibration::default();
     let scenario = LOCALIZATION_ACTIVE_SCENARIO;
 
+    let heading_cos_threshold =
+        (calib.obstacle_block_heading_tolerance_deg as f64).to_radians().cos();
+
     let graph = match PathGraph::load(scenario.map, &calib) {
         Ok(graph) => graph,
         Err(err) => {
@@ -109,7 +112,12 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                                 let threshold =
                                     (obstacle.distance_cm as f64 / 100.0f64).max(0.0)
                                         + calib.obstacle_block_margin_m as f64;
-                                for node in compute_blocked_nodes(plan, state, threshold) {
+                                for node in compute_blocked_nodes(
+                                    plan,
+                                    state,
+                                    threshold,
+                                    heading_cos_threshold,
+                                ) {
                                     blocked_nodes
                                         .insert(node, now + calib.obstacle_block_timeout);
                                 }
@@ -216,6 +224,7 @@ fn compute_blocked_nodes(
     plan: &PlannedPath,
     state: &DtoLocalizationState,
     threshold_m: f64,
+    heading_cos_threshold: f64,
 ) -> Vec<NodeKey> {
     if plan.waypoints.is_empty() {
         return Vec::new();
@@ -232,11 +241,27 @@ fn compute_blocked_nodes(
         }
     }
 
+    let heading_unit = state
+        .motion_heading_rad
+        .map(|ang| [ang.cos(), ang.sin()])
+        .or_else(|| heading_from_plan(plan, nearest_idx))
+        .and_then(normalize_vec);
+
     let mut blocked = Vec::new();
     let mut accumulated = 0.0;
     let mut prev = [plan.waypoints[nearest_idx].x, plan.waypoints[nearest_idx].y];
 
     for wp in plan.waypoints.iter().skip(nearest_idx) {
+        if let Some(heading) = heading_unit {
+            let vec = [wp.x - position[0], wp.y - position[1]];
+            if let Some(dir) = normalize_vec(vec) {
+                let dot = dir[0] * heading[0] + dir[1] * heading[1];
+                if dot < heading_cos_threshold {
+                    continue;
+                }
+            }
+        }
+
         if blocked.is_empty() {
             blocked.push(NodeKey {
                 lane: wp.lane,
@@ -262,4 +287,27 @@ fn compute_blocked_nodes(
 
 fn distance_2d(a: [f64; 2], b: [f64; 2]) -> f64 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
+}
+
+fn normalize_vec(mut vec: [f64; 2]) -> Option<[f64; 2]> {
+    let norm = (vec[0] * vec[0] + vec[1] * vec[1]).sqrt();
+    if norm <= 1e-6 {
+        None
+    } else {
+        vec[0] /= norm;
+        vec[1] /= norm;
+        Some(vec)
+    }
+}
+
+fn heading_from_plan(plan: &PlannedPath, idx: usize) -> Option<[f64; 2]> {
+    let current = plan.waypoints.get(idx)?;
+    if let Some(next) = plan.waypoints.get(idx + 1) {
+        Some([next.x - current.x, next.y - current.y])
+    } else if let Some(prev_idx) = idx.checked_sub(1) {
+        let prev = plan.waypoints.get(prev_idx)?;
+        Some([current.x - prev.x, current.y - prev.y])
+    } else {
+        None
+    }
 }

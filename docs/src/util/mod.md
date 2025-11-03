@@ -3,6 +3,10 @@
 - 경로: `src/util/mod.rs`
 - 계층: Util
 
-## 역할
-프리뷰 GUI 실행(`preview_runtime`), SDL 창 관리(`preview_window`), SDL 환경 초기화(`sdl_env`) 모듈을 재노출합니다.
+## 목적
+- 프리뷰 GUI 및 SDL 초기화 관련 유틸리티 모듈을 한 곳에서 노출해 상위 레이어가 명확히 가져올 수 있게 합니다.
 
+## 하위 모듈
+- `preview_runtime`: SDL 프리뷰 루프 실행.
+- `preview_window`: 창 생성과 이벤트 관리.
+- `sdl_env`: SDL 컨텍스트 초기화 헬퍼.
