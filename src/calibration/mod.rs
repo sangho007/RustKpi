@@ -12,7 +12,8 @@ pub mod ultrasonic;
 
 pub use adas_cod::{AdasLateralCalibration, AdasLongitudinalCalibration};
 pub use adas_localization::{
-    LOCALIZATION_MAP_PRESETS, LocalizationDestination, LocalizationLane, LocalizationMapId,
-    LocalizationMapPreset, LocalizationStart,
+    LOCALIZATION_ACTIVE_SCENARIO, LOCALIZATION_ARRIVAL_THRESHOLD_M, LOCALIZATION_MAP_PRESETS,
+    LocalizationDestination, LocalizationLane, LocalizationMapId, LocalizationMapPreset,
+    LocalizationStart,
 };
 pub use lane::{LaneCalibration, LaneCalibrationPreset, camera};

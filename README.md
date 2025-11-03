@@ -29,8 +29,8 @@
 | 계층 | 주요 모듈 | 경로 |
 | --- | --- | --- |
 | ASW | `vs_lane`, `vs_trafficlight`, `forwardcollision_ultrasonic`, `adas_cod`, `adas_localization`, `adas_path_local`, `adas_path_global` | `src/asw/` |
-| RTE | `rte_main`, `rte_dto`, `lib` | `src/rte/` |
-| BSW | `ecu_abs_cam`, `ecu_abs_ultrasonic`, `ecu_abs_pwm`, `ecu_abs_com`, `ecu_abs_imu`, `lib` | `src/bsw/` |
+| RTE | `rte_main`, `rte_dto` | `src/rte/` |
+| BSW | `ecu_abs_cam`, `ecu_abs_ultrasonic`, `ecu_abs_pwm`, `ecu_abs_com`, `ecu_abs_imu` | `src/bsw/` |
 | Calibration | `lane`, `traffic_light`, `pwm`, `ultrasonic`, `forward_collision`, `com`, `adas_cod` | `src/calibration/` |
 
 ```

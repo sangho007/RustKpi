@@ -9,17 +9,22 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import matplotlib
 
-matplotlib.use("Agg", force=True)
-import matplotlib.pyplot as plt
+
+def setup_matplotlib(show: bool) -> Any:
+    if not show:
+        matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt_module
+
+    return plt_module
 
 VEHICLE_WIDTH = 0.18  # m
 VEHICLE_LENGTH = 0.25  # m
 MAX_LANE_CHANGE_OFFSET = 1.0  # m, 차선 간 최소 거리 여유
-Y_FORWARD_TOL = 0.00  # y축 기준 허용 역방향 여유 (m)
+Y_FORWARD_TOL = 0.02  # y축 기준 허용 역방향 여유 (m)
 LANE_CHANGE_PENALTY = 1.0  # m, 차선 변경에 대한 추가 비용
 MAX_LANE_CHANGES = 1  # 허용되는 최대 차선 변경 횟수
 MAX_LANE_CHANGE_CANDIDATES = 8  # 차선 변경 시 고려할 후보 수
@@ -63,6 +68,11 @@ def parse_args() -> argparse.Namespace:
         "--figure",
         default="figure.png",
         help="--save 미사용 시 기본 저장 파일명 (기본값: figure.png)",
+    )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="플롯을 화면에 표시합니다. --save 미사용 시 파일로 저장하지 않습니다.",
     )
     return parser.parse_args()
 
@@ -266,9 +276,11 @@ def plot_environment(
     inner_pts: List[Waypoint],
     outer_pts: List[Waypoint],
     path: List[Waypoint],
-    output: Path,
+    plt_module: Any,
+    output: Optional[Path],
+    show: bool,
 ) -> None:
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig, ax = plt_module.subplots(figsize=(8, 8))
 
     if inner_pts:
         ax.scatter(
@@ -305,12 +317,16 @@ def plot_environment(
     ax.set_ylabel("Y [m]")
     ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
     ax.legend()
-    fig.savefig(output, bbox_inches="tight")
-    plt.close(fig)
+    if output is not None:
+        fig.savefig(output, bbox_inches="tight")
+    if show:
+        plt_module.show()
+    plt_module.close(fig)
 
 
 def main() -> None:
     args = parse_args()
+    plt_module = setup_matplotlib(args.show)
     map_path = Path(args.map_file)
     if not map_path.exists():
         raise FileNotFoundError(f"맵 파일을 찾을 수 없습니다: {map_path}")
@@ -334,13 +350,21 @@ def main() -> None:
 
     path = a_star(graph, nodes, start_key, goal_key)
 
-    save_path = args.save if args.save else Path(args.figure)
-    plot_environment(inner_pts, outer_pts, path, save_path)
+    if args.save:
+        save_path: Optional[Path] = args.save
+    elif args.show:
+        save_path = None
+    else:
+        save_path = Path(args.figure)
+    plot_environment(inner_pts, outer_pts, path, plt_module, save_path, args.show)
 
     print("경로 waypoint (lane,index):")
     for wp in path:
         print(f"{wp.lane},{wp.index} -> ({wp.x:.5f}, {wp.y:.5f})")
-    print(f"총 {len(path)}개 waypoint, 결과 플롯 저장: {save_path}")
+    if save_path is not None:
+        print(f"총 {len(path)}개 waypoint, 결과 플롯 저장: {save_path}")
+    if args.show:
+        print("플롯이 화면에 표시되었습니다.")
 
 
 if __name__ == "__main__":

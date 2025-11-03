@@ -4,7 +4,10 @@
 //! 계산된 `DtoLocalizationState`를 RTE 채널로 브로드캐스트한다.
 
 use crate::asw::lib::adas_localization_lib::{LocalizationRuntime, MapData, process_imu_sample};
-use crate::calibration::adas_localization::LOCALIZATION_ACTIVE_SCENARIO;
+use crate::calibration::adas_localization::{
+    LOCALIZATION_ACTIVE_SCENARIO, LOCALIZATION_ARRIVAL_THRESHOLD_M,
+};
+use crate::rte::rte_dto::{DtoLocalizationArrival, DtoLocalizationState};
 use crate::rte::rte_main::RteChannels;
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
@@ -77,6 +80,94 @@ pub async fn runnable_adas_localization(id: &'static str, channels: RteChannels)
             Err(RecvError::Closed) => {
                 // IMU 공급 태스크가 종료되면 Localization도 정리한다.
                 println!("[{}] IMU 채널이 닫혀 로컬라이제이션을 종료합니다.", id);
+                break;
+            }
+        }
+    }
+}
+
+/// Localization 결과를 구독해 도착지에 근접했는지 판정한다.
+pub async fn runnable_adas_arrival(id: &'static str, channels: RteChannels) {
+    let scenario = LOCALIZATION_ACTIVE_SCENARIO;
+    let map = match MapData::load(scenario.map) {
+        Ok(map) => map,
+        Err(err) => {
+            eprintln!(
+                "[{}] Arrival detector: map({:?}) 로딩 실패: {}",
+                id, scenario.map, err
+            );
+            return;
+        }
+    };
+
+    let destination = match map.waypoint(
+        scenario.destination.lane,
+        scenario.destination.waypoint_index,
+    ) {
+        Some(coord) => [coord.x as f64, coord.y as f64],
+        None => {
+            eprintln!(
+                "[{}] Arrival detector: 도착 waypoint_index={}가 맵 데이터 범위 밖입니다.",
+                id, scenario.destination.waypoint_index
+            );
+            return;
+        }
+    };
+
+    println!(
+        "[{}] Arrival detector armed: map={:?}, lane={:?}, dest=({:.3}, {:.3}), threshold={:.1}cm",
+        id,
+        scenario.map,
+        scenario.destination.lane,
+        destination[0],
+        destination[1],
+        LOCALIZATION_ARRIVAL_THRESHOLD_M * 100.0
+    );
+
+    let mut state_rx = channels.localization.state_tx.subscribe();
+    let arrival_tx = channels.localization.arrival_tx.clone();
+    let mut arrival_reported = false;
+    let mut alive_cnt: u32 = 0;
+
+    loop {
+        match state_rx.recv().await {
+            Ok(state_arc) => {
+                let state: &DtoLocalizationState = Arc::as_ref(&state_arc);
+                let dx = state.position_map_xy[0] - destination[0];
+                let dy = state.position_map_xy[1] - destination[1];
+                let distance = (dx * dx + dy * dy).sqrt();
+
+                let arrived = distance <= LOCALIZATION_ARRIVAL_THRESHOLD_M;
+                if arrived {
+                    if !arrival_reported {
+                        println!(
+                            "[{}] Arrival detected: distance={:.3}m, timestamp_ns={}",
+                            id, distance, state.timestamp_ns
+                        );
+                        arrival_reported = true;
+                    }
+                } else if arrival_reported && distance > LOCALIZATION_ARRIVAL_THRESHOLD_M * 1.5 {
+                    // 차량이 다시 멀어지면 재판정을 위해 재무장한다.
+                    arrival_reported = false;
+                }
+
+                let dto = Arc::new(DtoLocalizationArrival::new(
+                    arrived,
+                    distance,
+                    state.timestamp_ns,
+                    alive_cnt,
+                ));
+                let _ = arrival_tx.send(dto);
+                alive_cnt = alive_cnt.wrapping_add(1);
+            }
+            Err(RecvError::Lagged(skipped)) => {
+                eprintln!(
+                    "[{}] Arrival detector lagged by {} localization frames",
+                    id, skipped
+                );
+            }
+            Err(RecvError::Closed) => {
+                println!("[{}] Arrival detector: localization 채널 종료", id);
                 break;
             }
         }

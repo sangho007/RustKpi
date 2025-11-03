@@ -66,6 +66,116 @@ pub struct LocalizationMapPreset {
     pub destinations: &'static [LocalizationDestination],
 }
 
+const ONE_LANE_STARTS: [LocalizationStart; 2] = [
+    LocalizationStart {
+        id: "start_inner",
+        display_name: "출발 1차선",
+        lane: LocalizationLane::Inner,
+        waypoint_index: 44,
+    },
+    LocalizationStart {
+        id: "start_outer",
+        display_name: "출발 2차선",
+        lane: LocalizationLane::Outer,
+        waypoint_index: 44,
+    },
+];
+
+const ONE_LANE_DESTINATIONS: [LocalizationDestination; 2] = [
+    LocalizationDestination {
+        id: "goal_inner",
+        display_name: "도착 1차선",
+        lane: LocalizationLane::Inner,
+        waypoint_index: 0,
+        category: None,
+    },
+    LocalizationDestination {
+        id: "goal_outer",
+        display_name: "도착 2차선",
+        lane: LocalizationLane::Outer,
+        waypoint_index: 0,
+        category: None,
+    },
+];
+
+const SLANE_STARTS: [LocalizationStart; 2] = [
+    LocalizationStart {
+        id: "start_inner",
+        display_name: "출발 1차선",
+        lane: LocalizationLane::Inner,
+        waypoint_index: 56,
+    },
+    LocalizationStart {
+        id: "start_outer",
+        display_name: "출발 2차선",
+        lane: LocalizationLane::Outer,
+        waypoint_index: 58,
+    },
+];
+
+const SLANE_DESTINATIONS: [LocalizationDestination; 2] = [
+    LocalizationDestination {
+        id: "goal_inner",
+        display_name: "도착 1차선",
+        lane: LocalizationLane::Inner,
+        waypoint_index: 0,
+        category: None,
+    },
+    LocalizationDestination {
+        id: "goal_outer",
+        display_name: "도착 2차선",
+        lane: LocalizationLane::Outer,
+        waypoint_index: 0,
+        category: None,
+    },
+];
+
+const CROSSROAD_STARTS: [LocalizationStart; 2] = [
+    LocalizationStart {
+        id: "start_inner",
+        display_name: "출발 1차선",
+        lane: LocalizationLane::Inner,
+        waypoint_index: 94,
+    },
+    LocalizationStart {
+        id: "start_outer",
+        display_name: "출발 2차선",
+        lane: LocalizationLane::Outer,
+        waypoint_index: 79,
+    },
+];
+
+const CROSSROAD_DESTINATIONS: [LocalizationDestination; 4] = [
+    LocalizationDestination {
+        id: "goal_inner_left",
+        display_name: "도착 1차선 좌회전",
+        lane: LocalizationLane::Inner,
+        waypoint_index: 76,
+        category: Some("좌회전"),
+    },
+    LocalizationDestination {
+        id: "goal_outer_left",
+        display_name: "도착 2차선 좌회전",
+        lane: LocalizationLane::Outer,
+        waypoint_index: 50,
+        category: Some("좌회전"),
+    },
+    LocalizationDestination {
+        id: "goal_inner_straight",
+        display_name: "도착 1차선 직진",
+        lane: LocalizationLane::Inner,
+        waypoint_index: 0,
+        category: Some("직진"),
+    },
+    LocalizationDestination {
+        id: "goal_outer_straight",
+        display_name: "도착 2차선 직진",
+        lane: LocalizationLane::Outer,
+        waypoint_index: 0,
+        category: Some("직진"),
+    },
+];
+
 /// 단일 시나리오 테스트용 지도/출발지/도착지 선택.
 /// 필요한 값만 고쳐서 다른 맵 조합을 빠르게 검증한다.
 #[derive(Clone, Copy, Debug)]
@@ -75,23 +185,17 @@ pub struct LocalizationScenarioSelection {
     pub destination: LocalizationDestination,
 }
 
+/// 도착 판정을 위한 거리 임계값(미터). `LOCALIZATION_ACTIVE_SCENARIO` 기준으로 조정한다.
+pub const LOCALIZATION_ARRIVAL_THRESHOLD_M: f64 = 0.10; // 10cm
+
+// === 테스트할 시나리오 선택 영역 ===
+// map/start/destination을 원하는 프리셋 값으로 바꿔서 실험한다.
 /// 현재 테스트 시나리오 기본값.
 pub const LOCALIZATION_ACTIVE_SCENARIO: LocalizationScenarioSelection =
     LocalizationScenarioSelection {
         map: LocalizationMapId::Crossroad,
-        start: LocalizationStart {
-            id: "start_inner",
-            display_name: "출발 1차선",
-            lane: LocalizationLane::Inner,
-            waypoint_index: 94,
-        },
-        destination: LocalizationDestination {
-            id: "goal_inner_left",
-            display_name: "도착 1차선 좌회전",
-            lane: LocalizationLane::Inner,
-            waypoint_index: 76,
-            category: Some("좌회전"),
-        },
+        start: CROSSROAD_STARTS[0],
+        destination: CROSSROAD_DESTINATIONS[0],
     };
 
 /// ADAS Localization에서 선택 가능한 지도 프리셋.
@@ -99,117 +203,19 @@ pub const LOCALIZATION_MAP_PRESETS: &[LocalizationMapPreset] = &[
     LocalizationMapPreset {
         map: LocalizationMapId::OneLane,
         display_name: "1자 맵",
-        starts: &[
-            LocalizationStart {
-                id: "start_inner",
-                display_name: "출발 1차선",
-                lane: LocalizationLane::Inner,
-                waypoint_index: 44,
-            },
-            LocalizationStart {
-                id: "start_outer",
-                display_name: "출발 2차선",
-                lane: LocalizationLane::Outer,
-                waypoint_index: 44,
-            },
-        ],
-        destinations: &[
-            LocalizationDestination {
-                id: "goal_inner",
-                display_name: "도착 1차선",
-                lane: LocalizationLane::Inner,
-                waypoint_index: 0,
-                category: None,
-            },
-            LocalizationDestination {
-                id: "goal_outer",
-                display_name: "도착 2차선",
-                lane: LocalizationLane::Outer,
-                waypoint_index: 0,
-                category: None,
-            },
-        ],
+        starts: &ONE_LANE_STARTS,
+        destinations: &ONE_LANE_DESTINATIONS,
     },
     LocalizationMapPreset {
         map: LocalizationMapId::SLane,
         display_name: "S자 맵",
-        starts: &[
-            LocalizationStart {
-                id: "start_inner",
-                display_name: "출발 1차선",
-                lane: LocalizationLane::Inner,
-                waypoint_index: 56,
-            },
-            LocalizationStart {
-                id: "start_outer",
-                display_name: "출발 2차선",
-                lane: LocalizationLane::Outer,
-                waypoint_index: 58,
-            },
-        ],
-        destinations: &[
-            LocalizationDestination {
-                id: "goal_inner",
-                display_name: "도착 1차선",
-                lane: LocalizationLane::Inner,
-                waypoint_index: 0,
-                category: None,
-            },
-            LocalizationDestination {
-                id: "goal_outer",
-                display_name: "도착 2차선",
-                lane: LocalizationLane::Outer,
-                waypoint_index: 0,
-                category: None,
-            },
-        ],
+        starts: &SLANE_STARTS,
+        destinations: &SLANE_DESTINATIONS,
     },
     LocalizationMapPreset {
         map: LocalizationMapId::Crossroad,
         display_name: "사거리 맵",
-        starts: &[
-            LocalizationStart {
-                id: "start_inner",
-                display_name: "출발 1차선",
-                lane: LocalizationLane::Inner,
-                waypoint_index: 94,
-            },
-            LocalizationStart {
-                id: "start_outer",
-                display_name: "출발 2차선",
-                lane: LocalizationLane::Outer,
-                waypoint_index: 79,
-            },
-        ],
-        destinations: &[
-            LocalizationDestination {
-                id: "goal_inner_left",
-                display_name: "도착 1차선 좌회전",
-                lane: LocalizationLane::Inner,
-                waypoint_index: 76,
-                category: Some("좌회전"),
-            },
-            LocalizationDestination {
-                id: "goal_outer_left",
-                display_name: "도착 2차선 좌회전",
-                lane: LocalizationLane::Outer,
-                waypoint_index: 50,
-                category: Some("좌회전"),
-            },
-            LocalizationDestination {
-                id: "goal_inner_straight",
-                display_name: "도착 1차선 직진",
-                lane: LocalizationLane::Inner,
-                waypoint_index: 0,
-                category: Some("직진"),
-            },
-            LocalizationDestination {
-                id: "goal_outer_straight",
-                display_name: "도착 2차선 직진",
-                lane: LocalizationLane::Outer,
-                waypoint_index: 0,
-                category: Some("직진"),
-            },
-        ],
+        starts: &CROSSROAD_STARTS,
+        destinations: &CROSSROAD_DESTINATIONS,
     },
 ];

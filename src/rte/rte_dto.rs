@@ -358,6 +358,30 @@ impl DtoLocalizationState {
 }
 
 #[derive(Debug, Clone)]
+/// Localization 목적지 도착 여부를 전파하는 DTO.
+pub struct DtoLocalizationArrival {
+    /// 목적지 임계 거리 이내면 `true`.
+    pub arrived: bool,
+    /// 목적지까지의 직선 거리(m).
+    pub distance_m: f64,
+    /// Localization 샘플 타임스탬프(ns).
+    pub timestamp_ns: u64,
+    /// 도착 판정 alive 카운터.
+    pub alive_cnt: u32,
+}
+
+impl DtoLocalizationArrival {
+    pub fn new(arrived: bool, distance_m: f64, timestamp_ns: u64, alive_cnt: u32) -> Self {
+        Self {
+            arrived,
+            distance_m,
+            timestamp_ns,
+            alive_cnt,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 /// 신호등 감지 결과 DTO.
 pub struct DtoTrafficLight {
     pub traffic_light_color: TrafficLightColor,
