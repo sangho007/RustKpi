@@ -41,6 +41,7 @@ pub enum PreviewMessage {
     Raw(FramePacket),
     Processed(FramePacket),
     Bird(FramePacket),
+    Path(FramePacket),
 }
 
 /// 프리뷰 스레드가 메인 루프로 전달하는 이벤트.
@@ -84,14 +85,17 @@ fn run_preview_thread(
     let mut raw_preview: Option<SdlPreview> = None;
     let mut processed_preview: Option<SdlPreview> = None;
     let mut birds_eye_preview: Option<SdlPreview> = None;
+    let mut path_preview: Option<SdlPreview> = None;
     let mut raw_enabled = true;
     let mut processed_enabled = true;
     let mut birds_enabled = true;
+    let mut path_enabled = true;
     let mut running = true;
 
     let mut pending_raw: Option<FramePacket> = None;
     let mut pending_processed: Option<FramePacket> = None;
     let mut pending_bird: Option<FramePacket> = None;
+    let mut pending_path: Option<FramePacket> = None;
     let mut last_present = Instant::now();
     const WINDOW_MARGIN: i32 = 40;
     const WINDOW_WIDTH: i32 = 640;
@@ -101,6 +105,10 @@ fn run_preview_thread(
         (WINDOW_MARGIN + WINDOW_WIDTH + WINDOW_MARGIN, WINDOW_MARGIN);
     const BIRD_WINDOW_POS: (i32, i32) =
         (WINDOW_MARGIN, WINDOW_MARGIN + WINDOW_HEIGHT + WINDOW_MARGIN);
+    const PATH_WINDOW_POS: (i32, i32) = (
+        WINDOW_MARGIN + WINDOW_WIDTH * 2 + WINDOW_MARGIN * 3,
+        WINDOW_MARGIN,
+    );
 
     if raw_enabled {
         let dummy = FramePacket {
@@ -186,6 +194,7 @@ fn run_preview_thread(
                     &mut pending_raw,
                     &mut pending_processed,
                     &mut pending_bird,
+                    &mut pending_path,
                 );
                 while let Ok(msg) = rx.try_recv() {
                     update_pending_messages(
@@ -193,6 +202,7 @@ fn run_preview_thread(
                         &mut pending_raw,
                         &mut pending_processed,
                         &mut pending_bird,
+                        &mut pending_path,
                     );
                 }
             }
@@ -259,7 +269,25 @@ fn run_preview_thread(
                 birds_eye_preview = None;
             }
 
-            if raw_enabled || processed_enabled || birds_enabled {
+            if path_enabled {
+                if let Some(packet) = pending_path.take() {
+                    if ensure_preview(
+                        &mut path_preview,
+                        &env,
+                        "Path View",
+                        &packet,
+                        Some(PATH_WINDOW_POS),
+                    )
+                    .is_ok()
+                    {
+                        present_packet(path_preview.as_mut(), &packet, false);
+                    }
+                }
+            } else {
+                path_preview = None;
+            }
+
+            if raw_enabled || processed_enabled || birds_enabled || path_enabled {
                 last_present = now;
             }
         }
@@ -312,6 +340,17 @@ fn run_preview_thread(
                         if birds_enabled { "enabled" } else { "disabled" }
                     );
                 }
+                Event::KeyDown {
+                    keycode: Some(Keycode::M),
+                    ..
+                } => {
+                    path_enabled = !path_enabled;
+                    path_preview = None;
+                    println!(
+                        "[GUI] Path preview {}",
+                        if path_enabled { "enabled" } else { "disabled" }
+                    );
+                }
                 Event::Window {
                     win_event: WindowEvent::Close,
                     window_id,
@@ -329,6 +368,10 @@ fn run_preview_thread(
                         birds_eye_preview = None;
                         birds_enabled = false;
                         println!("[GUI] Bird's eye preview window closed");
+                    } else if path_preview.as_ref().map(|p| p.window_id()) == Some(window_id) {
+                        path_preview = None;
+                        path_enabled = false;
+                        println!("[GUI] Path preview window closed");
                     }
                 }
                 _ => {}
@@ -345,11 +388,13 @@ fn update_pending_messages(
     pending_raw: &mut Option<FramePacket>,
     pending_processed: &mut Option<FramePacket>,
     pending_bird: &mut Option<FramePacket>,
+    pending_path: &mut Option<FramePacket>,
 ) {
     match msg {
         PreviewMessage::Raw(frame) => *pending_raw = Some(frame),
         PreviewMessage::Processed(frame) => *pending_processed = Some(frame),
         PreviewMessage::Bird(frame) => *pending_bird = Some(frame),
+        PreviewMessage::Path(frame) => *pending_path = Some(frame),
     }
 }
 

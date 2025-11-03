@@ -4,12 +4,17 @@
 use crate::rte::rte_dto::*;
 use crate::rte::rte_main::RteChannels;
 use crate::util::preview_runtime::{self, FramePacket, FramePayload, PreviewEvent, PreviewMessage};
-use opencv::core::Mat;
-use opencv::prelude::MatTraitConst;
+use opencv::core::{CV_8UC3, Mat, Point, Scalar};
+use opencv::imgproc;
+use opencv::prelude::{MatExprTraitConst, MatTraitConst, MatTraitConstManual};
+use std::sync::{Arc, mpsc};
+use std::time::{Duration, Instant};
 use tokio::{select, sync::broadcast::error::RecvError};
 
 /// GUI 프리뷰를 활성화할지 여부.
-const DEBUG_ON: bool = false;
+const DEBUG_ON: bool = true;
+const PATH_PREVIEW_INTERVAL: Duration = Duration::from_millis(200);
+const PATH_CANVAS_SIZE: i32 = 640;
 
 /// RTE 채널을 사용하며 프리뷰 GUI와 데이터 스트림을 조율하는 메인 런타임 루프를 수행한다.
 pub async fn run(channels: RteChannels) -> opencv::Result<()> {
@@ -42,6 +47,16 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
     let mut distance_rx = ultrasonic_channels.raw_tx.subscribe();
     let mut imu_rx = imu_channels.parsed_tx.subscribe();
     let mut arrival_rx = localization_channels.arrival_tx.subscribe();
+    let mut loc_state_rx = localization_channels.state_tx.subscribe();
+    let mut global_path_rx = channels.path.global_tx.subscribe();
+    let mut local_path_rx = channels.path.local_tx.subscribe();
+
+    let mut latest_global_path: Option<Arc<DtoAdasGlobalPath>> = None;
+    let mut latest_local_path: Option<Arc<DtoAdasLocalPath>> = None;
+    let mut latest_localization_state: Option<DtoLocalizationState> = None;
+    let mut last_path_preview = Instant::now()
+        .checked_sub(PATH_PREVIEW_INTERVAL)
+        .unwrap_or_else(Instant::now);
 
     // Ctrl-C 입력을 감시해 사용자의 종료 요청을 처리한다.
     let ctrl_c = tokio::signal::ctrl_c();
@@ -153,12 +168,59 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                     break 'main_loop;
                 }
             },
+            // 전역 경로 업데이트를 처리한다.
+            result = global_path_rx.recv() => match result {
+                Ok(path_arc) => {
+                    let mut newest = path_arc;
+                    while let Ok(newer) = global_path_rx.try_recv() {
+                        newest = newer;
+                    }
+                    latest_global_path = Some(newest);
+                    maybe_publish_path_preview(
+                        preview_tx.as_ref(),
+                        latest_global_path.as_ref(),
+                        latest_local_path.as_ref(),
+                        latest_localization_state.as_ref(),
+                        &mut last_path_preview,
+                    );
+                }
+                Err(RecvError::Lagged(n)) => {
+                    eprintln!("[MAIN] Global path lagged by {}", n);
+                }
+                Err(RecvError::Closed) => {
+                    println!("[MAIN] Global path channel closed, shutting down...");
+                    break 'main_loop;
+                }
+            },
+            // 로컬 경로 업데이트를 처리한다.
+            result = local_path_rx.recv() => match result {
+                Ok(path_arc) => {
+                    let mut newest = path_arc;
+                    while let Ok(newer) = local_path_rx.try_recv() {
+                        newest = newer;
+                    }
+                    latest_local_path = Some(newest);
+                    maybe_publish_path_preview(
+                        preview_tx.as_ref(),
+                        latest_global_path.as_ref(),
+                        latest_local_path.as_ref(),
+                        latest_localization_state.as_ref(),
+                        &mut last_path_preview,
+                    );
+                }
+                Err(RecvError::Lagged(n)) => {
+                    eprintln!("[MAIN] Local path lagged by {}", n);
+                }
+                Err(RecvError::Closed) => {
+                    println!("[MAIN] Local path channel closed, shutting down...");
+                    break 'main_loop;
+                }
+            },
 
             // 차선 각도 결과를 로그로 출력한다.
             result = lane_angle_rx.recv() => match result {
-                Ok(lane_angle) => {
-                    //println!("Angle: {}, alive_cnt: {}", lane_angle.angle, lane_angle.alive_cnt);
-                    ;
+                Ok(_lane_angle) => {
+                    //println!("Angle: {}, alive_cnt: {}", _lane_angle.angle, _lane_angle.alive_cnt);
                 }
                 Err(RecvError::Lagged(n)) => {
                     eprintln!("[MAIN] Lane angle lagged by {}", n);
@@ -207,6 +269,30 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                 }
             },
 
+            // Localization 상태를 갱신해 경로 시각화에 반영한다.
+            result = loc_state_rx.recv() => match result {
+                Ok(state_arc) => {
+                    let mut newest = state_arc;
+                    while let Ok(newer) = loc_state_rx.try_recv() {
+                        newest = newer;
+                    }
+                    latest_localization_state = Some(newest.as_ref().clone());
+                    maybe_publish_path_preview(
+                        preview_tx.as_ref(),
+                        latest_global_path.as_ref(),
+                        latest_local_path.as_ref(),
+                        latest_localization_state.as_ref(),
+                        &mut last_path_preview,
+                    );
+                }
+                Err(RecvError::Lagged(n)) => {
+                    eprintln!("[MAIN] Localization state lagged by {}", n);
+                }
+                Err(RecvError::Closed) => {
+                    println!("[MAIN] Localization state channel closed, shutting down...");
+                    break 'main_loop;
+                }
+            },
             // IMU DTO를 출력해 데이터 흐름을 확인한다.
             result = imu_rx.recv() => match result {
                 Ok(imu) => {
@@ -276,6 +362,245 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
 
     println!("== 시뮬레이션 종료 ==");
     Ok(())
+}
+
+fn maybe_publish_path_preview(
+    preview_tx: Option<&mpsc::Sender<PreviewMessage>>,
+    global_path: Option<&Arc<DtoAdasGlobalPath>>,
+    local_path: Option<&Arc<DtoAdasLocalPath>>,
+    localization_state: Option<&DtoLocalizationState>,
+    last_sent: &mut Instant,
+) {
+    if preview_tx.is_none() {
+        return;
+    }
+    if last_sent.elapsed() < PATH_PREVIEW_INTERVAL {
+        return;
+    }
+    let frame = match build_path_preview_frame(global_path, local_path, localization_state) {
+        Some(frame) => frame,
+        None => return,
+    };
+    if let Some(tx) = preview_tx {
+        if tx.send(PreviewMessage::Path(frame)).is_ok() {
+            *last_sent = Instant::now();
+        }
+    }
+}
+
+fn build_path_preview_frame(
+    global_path: Option<&Arc<DtoAdasGlobalPath>>,
+    local_path: Option<&Arc<DtoAdasLocalPath>>,
+    localization_state: Option<&DtoLocalizationState>,
+) -> Option<FramePacket> {
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let mut has_points = false;
+
+    if let Some(path) = global_path {
+        for wp in &path.waypoints {
+            let x = wp.position_xy[0] as f64;
+            let y = wp.position_xy[1] as f64;
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+            has_points = true;
+        }
+    }
+    if let Some(path) = local_path {
+        for wp in &path.waypoints {
+            let x = wp.position_xy[0] as f64;
+            let y = wp.position_xy[1] as f64;
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+            has_points = true;
+        }
+    }
+    if let Some(state) = localization_state {
+        let x = state.position_map_xy[0];
+        let y = state.position_map_xy[1];
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+        has_points = true;
+    }
+
+    if !has_points {
+        return None;
+    }
+
+    if (max_x - min_x).abs() < 1e-3 {
+        min_x -= 1.0;
+        max_x += 1.0;
+    }
+    if (max_y - min_y).abs() < 1e-3 {
+        min_y -= 1.0;
+        max_y += 1.0;
+    }
+
+    let span_x = max_x - min_x;
+    let span_y = max_y - min_y;
+    let pad_x = span_x * 0.08 + 1.0;
+    let pad_y = span_y * 0.08 + 1.0;
+    min_x -= pad_x;
+    max_x += pad_x;
+    min_y -= pad_y;
+    max_y += pad_y;
+
+    let draw_width = (PATH_CANVAS_SIZE as f64) - 40.0;
+    let draw_height = (PATH_CANVAS_SIZE as f64) - 40.0;
+    let scale_x = if (max_x - min_x).abs() < f64::EPSILON {
+        1.0
+    } else {
+        draw_width / (max_x - min_x)
+    };
+    let scale_y = if (max_y - min_y).abs() < f64::EPSILON {
+        1.0
+    } else {
+        draw_height / (max_y - min_y)
+    };
+
+    let to_point = |x: f64, y: f64| -> Point {
+        let mut px = ((x - min_x) * scale_x + 20.0).round() as i32;
+        let mut py = ((draw_height - (y - min_y) * scale_y) + 20.0).round() as i32;
+        let max_coord = PATH_CANVAS_SIZE - 1;
+        px = px.clamp(0, max_coord);
+        py = py.clamp(0, max_coord);
+        Point::new(px, py)
+    };
+
+    let expr = match Mat::zeros(PATH_CANVAS_SIZE, PATH_CANVAS_SIZE, CV_8UC3) {
+        Ok(expr) => expr,
+        Err(_) => return None,
+    };
+    let mut canvas = match expr.to_mat() {
+        Ok(mat) => mat,
+        Err(_) => return None,
+    };
+
+    if let Some(path) = global_path {
+        let mut previous: Option<Point> = None;
+        for wp in &path.waypoints {
+            let pt = to_point(wp.position_xy[0] as f64, wp.position_xy[1] as f64);
+            if let Some(prev) = previous {
+                let _ = imgproc::line(
+                    &mut canvas,
+                    prev,
+                    pt,
+                    Scalar::new(128.0, 128.0, 255.0, 0.0),
+                    2,
+                    imgproc::LINE_AA,
+                    0,
+                );
+            }
+            previous = Some(pt);
+        }
+    }
+
+    if let Some(path) = local_path {
+        let mut previous: Option<Point> = None;
+        for wp in &path.waypoints {
+            let pt = to_point(wp.position_xy[0] as f64, wp.position_xy[1] as f64);
+            if let Some(prev) = previous {
+                let _ = imgproc::line(
+                    &mut canvas,
+                    prev,
+                    pt,
+                    Scalar::new(80.0, 255.0, 80.0, 0.0),
+                    3,
+                    imgproc::LINE_AA,
+                    0,
+                );
+            }
+            let _ = imgproc::circle(
+                &mut canvas,
+                pt,
+                3,
+                Scalar::new(120.0, 255.0, 120.0, 0.0),
+                -1,
+                imgproc::LINE_AA,
+                0,
+            );
+            previous = Some(pt);
+        }
+    }
+
+    if let Some(state) = localization_state {
+        let pos = to_point(state.position_map_xy[0], state.position_map_xy[1]);
+        let heading = state.yaw_rad;
+        let heading_len = 1.5;
+        let hx = state.position_map_xy[0] + heading_len * heading.cos();
+        let hy = state.position_map_xy[1] + heading_len * heading.sin();
+        let head_pt = to_point(hx, hy);
+        let _ = imgproc::circle(
+            &mut canvas,
+            pos,
+            6,
+            Scalar::new(0.0, 0.0, 255.0, 0.0),
+            -1,
+            imgproc::LINE_AA,
+            0,
+        );
+        let _ = imgproc::line(
+            &mut canvas,
+            pos,
+            head_pt,
+            Scalar::new(0.0, 0.0, 255.0, 0.0),
+            2,
+            imgproc::LINE_AA,
+            0,
+        );
+    }
+
+    let label_position = Point::new(18, 28);
+    let _ = imgproc::put_text(
+        &mut canvas,
+        "Global Path",
+        Point::new(label_position.x, label_position.y),
+        imgproc::FONT_HERSHEY_SIMPLEX,
+        0.5,
+        Scalar::new(128.0, 128.0, 255.0, 0.0),
+        1,
+        imgproc::LINE_AA,
+        false,
+    );
+    let _ = imgproc::put_text(
+        &mut canvas,
+        "Local Path",
+        Point::new(label_position.x, label_position.y + 22),
+        imgproc::FONT_HERSHEY_SIMPLEX,
+        0.5,
+        Scalar::new(80.0, 255.0, 80.0, 0.0),
+        1,
+        imgproc::LINE_AA,
+        false,
+    );
+    let _ = imgproc::put_text(
+        &mut canvas,
+        "Pose",
+        Point::new(label_position.x, label_position.y + 44),
+        imgproc::FONT_HERSHEY_SIMPLEX,
+        0.5,
+        Scalar::new(0.0, 0.0, 255.0, 0.0),
+        1,
+        imgproc::LINE_AA,
+        false,
+    );
+
+    let data = canvas.data_bytes().ok()?.to_vec();
+    Some(FramePacket {
+        width: PATH_CANVAS_SIZE as u32,
+        height: PATH_CANVAS_SIZE as u32,
+        stride: (PATH_CANVAS_SIZE as usize) * 3,
+        format: ColorFormat::Bgr,
+        payload: FramePayload::Owned(data),
+    })
 }
 
 /// OpenCV Mat의 채널 수를 기준으로 프리뷰에 사용할 색상 포맷을 결정한다.
