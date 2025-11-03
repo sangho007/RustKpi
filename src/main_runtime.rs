@@ -17,6 +17,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
     let camera_channels = channels.camera.clone();
     let ultrasonic_channels = channels.ultrasonic.clone();
     let imu_channels = channels.imu.clone();
+    let localization_channels = channels.localization.clone();
 
     // 사용자에게 실행 상태를 안내한다.
     println!("== 시스템 실행 중... (GUI 창에서 'q'를 누르면 종료) ==");
@@ -40,6 +41,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
     let mut lane_angle_rx = camera_channels.lane_angle_tx.subscribe();
     let mut distance_rx = ultrasonic_channels.raw_tx.subscribe();
     let mut imu_rx = imu_channels.parsed_tx.subscribe();
+    let mut arrival_rx = localization_channels.arrival_tx.subscribe();
 
     // Ctrl-C 입력을 감시해 사용자의 종료 요청을 처리한다.
     let ctrl_c = tokio::signal::ctrl_c();
@@ -177,6 +179,30 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                 }
                 Err(RecvError::Closed) => {
                     eprintln!("[MAIN] Uss angle channel closed.");
+                    break 'main_loop;
+                }
+            },
+
+            // 목적지 도착 여부를 감시한다.
+            result = arrival_rx.recv() => match result {
+                Ok(dto) => {
+                    let mut latest = dto;
+                    while let Ok(newer) = arrival_rx.try_recv() {
+                        latest = newer;
+                    }
+                    if latest.arrived {
+                        println!(
+                            "[MAIN] Destination reached (timestamp_ns={}), shutting down...",
+                            latest.timestamp_ns
+                        );
+                        break 'main_loop;
+                    }
+                }
+                Err(RecvError::Lagged(n)) => {
+                    eprintln!("[MAIN] Localization arrival lagged by {}", n);
+                }
+                Err(RecvError::Closed) => {
+                    println!("[MAIN] Localization arrival channel closed, shutting down...");
                     break 'main_loop;
                 }
             },

@@ -8,6 +8,48 @@ mod rte;
 mod util;
 
 use opencv::core;
+use tokio::sync::broadcast::error::RecvError;
+use tokio::time::{Duration, sleep};
+
+/// `true`이면 EV READY(초기 IMU 수신) 후 3초 대기 뒤 주행 태스크를 기동한다.
+/// 디버그 시 즉시 시작하려면 `false`로 바꾼 뒤 재빌드한다.
+const EV_READY_GATE_ENABLED: bool = true;
+
+async fn wait_for_ev_ready(
+    channels: &rte::rte_main::RteChannels,
+    gate_enabled: bool,
+) -> opencv::Result<()> {
+    if !gate_enabled {
+        println!("[INIT] EV READY gate disabled (debug mode).");
+        return Ok(());
+    }
+
+    println!("[INIT] Waiting for EV READY (IMU stream)...");
+    let mut imu_rx = channels.imu.parsed_tx.subscribe();
+
+    loop {
+        match imu_rx.recv().await {
+            Ok(imu) => {
+                println!(
+                    "[INIT] EV READY confirmed (seq={}, alive_cnt={}).",
+                    imu.header.seq, imu.alive_cnt
+                );
+                println!("[INIT] Stabilizing... (3s)");
+                sleep(Duration::from_secs(3)).await;
+                return Ok(());
+            }
+            Err(RecvError::Lagged(_)) => {
+                continue;
+            }
+            Err(RecvError::Closed) => {
+                return Err(opencv::Error::new(
+                    opencv::core::StsError,
+                    "IMU channel closed before EV READY".to_string(),
+                ));
+            }
+        }
+    }
+}
 
 /// 애플리케이션의 비동기 메인 진입점으로 각 ECU 및 ASW 작업을 실행한다.
 #[tokio::main(flavor = "multi_thread")]
@@ -21,6 +63,7 @@ async fn main() -> opencv::Result<()> {
     // RTE 시스템에서 공유 채널을 준비한다.
     let rte::rte_main::RteSystem { channels } = rte::rte_main::init();
     let camera_channels = channels.camera.clone();
+    let gate_enabled = EV_READY_GATE_ENABLED;
 
     // 백그라운드 태스크 핸들을 추적한다.
     let mut tasks = Vec::new();
@@ -65,6 +108,20 @@ async fn main() -> opencv::Result<()> {
         tasks.push(tokio::spawn(async move {
             bsw::ecu_abs_pwm::ea_pca9685_actuator("PCA9685", control).await;
         }));
+    }
+
+    if let Err(err) = wait_for_ev_ready(&channels, gate_enabled).await {
+        eprintln!("[INIT] EV READY wait failed: {}", err);
+        for handle in &tasks {
+            handle.abort();
+        }
+        return Err(err);
+    }
+
+    if gate_enabled {
+        println!("[INIT] EV READY satisfied. Launching driving tasks...");
+    } else {
+        println!("[INIT] Launching driving tasks immediately (gate disabled).");
     }
 
     // ASW PreProcess Task
