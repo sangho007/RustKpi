@@ -89,10 +89,10 @@ async fn main() -> opencv::Result<()> {
 
     // ASW TrafficLight Task
     {
-        let cam = camera_channels.clone();
+        let chans = channels.clone();
         tasks.push(tokio::spawn(async move {
             if let Err(err) =
-                asw::vs_trafficlight::runnable_vs_detect_trafficlight("Traffic", cam).await
+                asw::vs_trafficlight::runnable_vs_detect_trafficlight("Traffic", chans).await
             {
                 eprintln!("[ASW] Traffic light detection exited with error: {err}");
             }

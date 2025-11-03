@@ -15,7 +15,7 @@ BSW와 ASW 간에 오가는 데이터 전송 객체(Data Transfer Object)를 정
 
 ## 초음파 DTO
 - `DtoUltraSonicRaw { distance: f32, alive_cnt }`
-- `DtoUltraSonicObstacle { detected: bool, alive_cnt }`
+- `DtoUltraSonicObstacle { stop_requested: bool, lane_change_requested: bool, distance_cm: f32, alive_cnt }`
 
 ## 제어 DTO
 - `DtoServoCtrl { channel: u8, angle: u32 }`
@@ -32,6 +32,7 @@ BSW와 ASW 간에 오가는 데이터 전송 객체(Data Transfer Object)를 정
 
 ## 신호등 DTO
 - `DtoTrafficLight { traffic_light_color: TrafficLightColor, alive_cnt }`
+- `DtoTrafficLightDirective { stop_requested: bool, accelerate_requested: bool, inside_detection_zone: bool, source_color: TrafficLightColor, alive_cnt }`
 
 ## 연관 라이브러리
 - `CameraBuffer`, `ColorFormat`, `BufferRecycler`는 `rte::lib::camera_lib`에서 재사용되어 libcamera/비디오 버퍼를 안전하게 공유합니다.

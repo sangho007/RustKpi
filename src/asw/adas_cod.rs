@@ -5,8 +5,8 @@
 use crate::asw::lib::vs_trafficlight_lib::TrafficLightColor;
 use crate::calibration::{AdasLateralCalibration, AdasLongitudinalCalibration};
 use crate::rte::rte_dto::{
-    DtoCamLaneAngle, DtoDcMotorCtrl, DtoServoCtrl, DtoTrafficLight, DtoUltraSonicObstacle,
-    DtoUltraSonicRaw,
+    DtoCamLaneAngle, DtoDcMotorCtrl, DtoServoCtrl, DtoTrafficLight, DtoTrafficLightDirective,
+    DtoUltraSonicObstacle, DtoUltraSonicRaw,
 };
 use crate::rte::rte_main::RteChannels;
 use std::sync::Arc;
@@ -111,6 +111,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let mut distance_rx = channels.ultrasonic.raw_tx.subscribe();
     let mut obstacle_rx = channels.ultrasonic.obstacle_tx.subscribe();
     let mut traffic_rx = channels.camera.traffic_light_tx.subscribe();
+    let mut traffic_directive_rx = channels.camera.traffic_light_directive_tx.subscribe();
     let dc_tx = channels.control.dc_motor_tx.clone();
 
     let mut tick = time::interval(calib.control_period);
@@ -119,6 +120,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let mut latest_distance: Option<DtoUltraSonicRaw> = None;
     let mut latest_obstacle: Option<DtoUltraSonicObstacle> = None;
     let mut latest_signal: Option<DtoTrafficLight> = None;
+    let mut latest_directive: Option<DtoTrafficLightDirective> = None;
     let mut last_cmd: Option<(u32, u32)> = None;
     let mut alive_cnt: u32 = 0;
     let mut last_log = Instant::now();
@@ -165,11 +167,29 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             }
             Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
         }
+        match traffic_directive_rx.try_recv() {
+            Ok(dto) => {
+                latest_directive = Some(dto.as_ref().clone());
+                while let Ok(newer) = traffic_directive_rx.try_recv() {
+                    latest_directive = Some(newer.as_ref().clone());
+                }
+            }
+            Err(TryRecvError::Lagged(n)) => {
+                eprintln!(
+                    "[{}] ADAS longitudinal traffic directive lagged by {}",
+                    id, n
+                );
+            }
+            Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
+        }
 
         tick.tick().await;
 
         // 가장 최근 거리 값과 임계치 비교
-        let distance_cm = latest_distance.as_ref().map(|d| d.distance);
+        let distance_cm = latest_obstacle
+            .as_ref()
+            .map(|o| o.distance_cm)
+            .or_else(|| latest_distance.as_ref().map(|d| d.distance));
         let distance_state = match distance_cm {
             Some(distance) => (
                 distance <= calib.stop_distance_cm,
@@ -177,16 +197,26 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             ),
             None => (true, true),
         };
-        let obstacle_detected = latest_obstacle
+        let obstacle_status = latest_obstacle.as_ref();
+        let stop_requested_obstacle = obstacle_status.map(|d| d.stop_requested).unwrap_or(false);
+        let stop_requested_signal = latest_directive
             .as_ref()
-            .map(|d| d.detected)
+            .map(|d| d.stop_requested && d.inside_detection_zone)
+            .unwrap_or(false);
+        let stop_requested = stop_requested_obstacle || stop_requested_signal;
+        let lane_change_requested = obstacle_status
+            .map(|d| d.lane_change_requested)
+            .unwrap_or(false);
+        let accelerate_requested = latest_directive
+            .as_ref()
+            .map(|d| d.accelerate_requested && d.inside_detection_zone)
             .unwrap_or(false);
         let traffic_color = latest_signal
             .as_ref()
             .map(|signal| signal.traffic_light_color.clone());
 
         // 장애물·신호·거리 조건을 종합해 정지 여부를 결정한다.
-        let need_stop = obstacle_detected
+        let need_stop = stop_requested
             || matches!(traffic_color.as_ref(), Some(TrafficLightColor::Red))
             || distance_state.0;
 
@@ -194,7 +224,11 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             traffic_color.as_ref(),
             Some(TrafficLightColor::Yellow | TrafficLightColor::Off)
         );
-        let need_caution = caution_signal || distance_state.1;
+        let need_caution = if accelerate_requested {
+            false
+        } else {
+            caution_signal || distance_state.1 || lane_change_requested
+        };
 
         let (direction, speed) = if need_stop {
             (0, 0)
@@ -219,8 +253,15 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
                 .map(|d| format!("{:.1}", d))
                 .unwrap_or_else(|| "--".to_string());
             println!(
-                "[{}] Longitudinal: dist={}cm obstacle={} signal={:?} -> dir={} speed={}",
-                id, distance_str, obstacle_detected, traffic_color, direction, speed
+                "[{}] Longitudinal: dist={}cm stop_req={} lane_change={} accel_req={} signal={:?} -> dir={} speed={}",
+                id,
+                distance_str,
+                stop_requested,
+                lane_change_requested,
+                accelerate_requested,
+                traffic_color,
+                direction,
+                speed
             );
             last_log = Instant::now();
         }

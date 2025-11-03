@@ -174,15 +174,27 @@ impl DtoDcMotorCtrl {
 #[derive(Debug, Clone)]
 /// 초음파 기반 장애물 감지 결과.
 pub struct DtoUltraSonicObstacle {
-    pub detected: bool,
+    /// 즉시 정지를 요청해야 하는지 여부.
+    pub stop_requested: bool,
+    /// 차선 변경을 시도하도록 권고하는지 여부.
+    pub lane_change_requested: bool,
+    /// 최신 측정 거리(cm). 핵심 로직에서 동일 값을 재사용할 수 있도록 제공한다.
+    pub distance_cm: f32,
     pub alive_cnt: u32,
 }
 
 impl DtoUltraSonicObstacle {
     /// 장애물 검출 여부와 alive 카운터를 지정해 생성한다.
-    pub fn new(detected: bool, alive_cnt: u32) -> Self {
+    pub fn new(
+        stop_requested: bool,
+        lane_change_requested: bool,
+        distance_cm: f32,
+        alive_cnt: u32,
+    ) -> Self {
         Self {
-            detected,
+            stop_requested,
+            lane_change_requested,
+            distance_cm,
             alive_cnt,
         }
     }
@@ -393,6 +405,34 @@ impl DtoTrafficLight {
     pub fn new(traffic_light_color: TrafficLightColor, alive_cnt: u32) -> Self {
         Self {
             traffic_light_color,
+            alive_cnt,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+/// 신호등 감지 기반 주행 요청(DTO).
+pub struct DtoTrafficLightDirective {
+    pub stop_requested: bool,
+    pub accelerate_requested: bool,
+    pub inside_detection_zone: bool,
+    pub source_color: TrafficLightColor,
+    pub alive_cnt: u32,
+}
+
+impl DtoTrafficLightDirective {
+    pub fn new(
+        stop_requested: bool,
+        accelerate_requested: bool,
+        inside_detection_zone: bool,
+        source_color: TrafficLightColor,
+        alive_cnt: u32,
+    ) -> Self {
+        Self {
+            stop_requested,
+            accelerate_requested,
+            inside_detection_zone,
+            source_color,
             alive_cnt,
         }
     }

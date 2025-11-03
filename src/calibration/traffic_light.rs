@@ -1,6 +1,7 @@
 //! 신호등 인식에 필요한 캘리브레이션 값.
 //! ROI 스케일링과 HSV 색상 임계값, 클러스터링 파라미터를 정의한다.
 
+use crate::calibration::adas_localization::LocalizationMapId;
 use crate::calibration::camera::CameraCalibration;
 
 const BASE_WIDTH: f32 = 640.0;
@@ -72,3 +73,23 @@ impl Default for TrafficLightCalibration {
         }
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+/// 신호등 감지 활성화 구간(맵 좌표계 기준, 단위: m).
+pub struct TrafficLightDetectionZone {
+    pub map: LocalizationMapId,
+    pub x_min: f64,
+    pub x_max: f64,
+    pub y_min: f64,
+    pub y_max: f64,
+}
+
+/// 신호등 감지에 사용할 맵/좌표 구간 목록.
+pub const TRAFFIC_LIGHT_DETECTION_ZONES: &[TrafficLightDetectionZone] =
+    &[TrafficLightDetectionZone {
+        map: LocalizationMapId::Crossroad,
+        x_min: -0.3,
+        x_max: 0.3,
+        y_min: -1.24,
+        y_max: -0.8,
+    }];

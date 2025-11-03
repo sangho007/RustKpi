@@ -22,13 +22,24 @@ pub async fn runnable_forwardcollision_obstacle_detection(
     let handle = tokio::task::spawn_blocking(move || {
         let mut rx = raw_tx.subscribe();
         let mut alive_cnt = 0;
+        let stop_threshold = calibration.stop_request_distance_cm;
+        let lane_change_threshold = calibration
+            .lane_change_request_distance_cm
+            .max(stop_threshold);
 
         loop {
             match rx.blocking_recv() {
                 Ok(ultrasonic_dto) => {
-                    // 거리가 임계값 이하인지 판별해 장애물 플래그를 설정한다.
-                    let detected = ultrasonic_dto.distance < calibration.threshold_distance;
-                    let obstacle_dto = Arc::new(DtoUltraSonicObstacle::new(detected, alive_cnt));
+                    // 거리(cm)에 따라 정지/차선 변경 요청 여부를 판정한다.
+                    let distance = ultrasonic_dto.distance;
+                    let stop_requested = distance <= stop_threshold;
+                    let lane_change_requested = distance <= lane_change_threshold;
+                    let obstacle_dto = Arc::new(DtoUltraSonicObstacle::new(
+                        stop_requested,
+                        lane_change_requested,
+                        distance,
+                        alive_cnt,
+                    ));
                     let _ = obstacle_tx.send(obstacle_dto);
 
                     alive_cnt += 1;

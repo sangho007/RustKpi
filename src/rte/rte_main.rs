@@ -4,7 +4,7 @@
 use crate::rte::rte_dto::{
     DtoCamBirdEyeView, DtoCamLaneAngle, DtoCamProcessed, DtoCamRaw, DtoDcMotorCtrl, DtoImu,
     DtoLocalizationArrival, DtoLocalizationState, DtoServoCtrl, DtoTcpTelemetry, DtoTrafficLight,
-    DtoUltraSonicObstacle, DtoUltraSonicRaw,
+    DtoTrafficLightDirective, DtoUltraSonicObstacle, DtoUltraSonicRaw,
 };
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -14,6 +14,7 @@ pub type CamProcessedSender = broadcast::Sender<Arc<DtoCamProcessed>>;
 pub type CamBirdEyeSender = broadcast::Sender<Arc<DtoCamBirdEyeView>>;
 pub type CamLaneAngleSender = broadcast::Sender<Arc<DtoCamLaneAngle>>;
 pub type TrafficLightSender = broadcast::Sender<Arc<DtoTrafficLight>>;
+pub type TrafficLightDirectiveSender = broadcast::Sender<Arc<DtoTrafficLightDirective>>;
 pub type UltraRawSender = broadcast::Sender<Arc<DtoUltraSonicRaw>>;
 pub type UltraObstacleSender = broadcast::Sender<Arc<DtoUltraSonicObstacle>>;
 pub type ServoCtrlSender = broadcast::Sender<Arc<DtoServoCtrl>>;
@@ -28,6 +29,7 @@ const CAM_PROCESSED_CAPACITY: usize = 6;
 const CAM_BIRD_EYE_CAPACITY: usize = 4;
 const CAM_LANE_ANGLE_CAPACITY: usize = 8;
 const TRAFFIC_LIGHT_CAPACITY: usize = 8;
+const TRAFFIC_LIGHT_DIRECTIVE_CAPACITY: usize = 8;
 const ULTRA_RAW_CAPACITY: usize = 8;
 const ULTRA_OBSTACLE_CAPACITY: usize = 8;
 const SERVO_CTRL_CAPACITY: usize = 16;
@@ -45,6 +47,7 @@ pub struct CameraChannels {
     pub bird_eye_tx: CamBirdEyeSender,
     pub lane_angle_tx: CamLaneAngleSender,
     pub traffic_light_tx: TrafficLightSender,
+    pub traffic_light_directive_tx: TrafficLightDirectiveSender,
 }
 
 #[derive(Clone)]
@@ -104,6 +107,7 @@ pub fn init() -> RteSystem {
     let (cam_bird_eye_tx, _) = broadcast::channel(CAM_BIRD_EYE_CAPACITY);
     let (cam_lane_angle_tx, _) = broadcast::channel(CAM_LANE_ANGLE_CAPACITY);
     let (traffic_light_tx, _) = broadcast::channel(TRAFFIC_LIGHT_CAPACITY);
+    let (traffic_light_directive_tx, _) = broadcast::channel(TRAFFIC_LIGHT_DIRECTIVE_CAPACITY);
 
     let (ultra_raw_tx, _) = broadcast::channel(ULTRA_RAW_CAPACITY);
     let (ultra_obstacle_tx, _) = broadcast::channel(ULTRA_OBSTACLE_CAPACITY);
@@ -121,6 +125,7 @@ pub fn init() -> RteSystem {
         bird_eye_tx: cam_bird_eye_tx,
         lane_angle_tx: cam_lane_angle_tx,
         traffic_light_tx,
+        traffic_light_directive_tx,
     };
 
     let ultrasonic = UltrasonicChannels {

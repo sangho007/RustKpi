@@ -24,8 +24,8 @@ Tokio 멀티스레드 런타임을 초기화하고 RTE 채널, BSW 디바이스 
 - **ASW**
   - `asw::vs_lane::runnable_vs_preprocessing`: RAW 프레임을 전처리(`DtoCamProcessed`)해 퍼블리시합니다.
   - `asw::vs_lane::runnable_vs_get_lane_angle`: 버드아이 뷰와 조향각(`DtoCamBirdEyeView`, `DtoCamLaneAngle`)을 계산합니다.
-  - `asw::vs_trafficlight::runnable_vs_detect_trafficlight`: HSV + DBSCAN 파이프라인으로 신호등 색(`DtoTrafficLight`)을 판정합니다.
-  - `asw::forwardcollision_ultrasonic::runnable_forwardcollision_obstacle_detection`: 거리 임계값(`ForwardCollisionCalibration`)으로 장애물 이벤트(`DtoUltraSonicObstacle`)를 생성합니다.
+  - `asw::vs_trafficlight::runnable_vs_detect_trafficlight`: Localization 감지 구간에서만 HSV + DBSCAN으로 신호등 색(`DtoTrafficLight`)을 판정하고, 정지/가속 요청(`DtoTrafficLightDirective`)을 브로드캐스트합니다.
+  - `asw::forwardcollision_ultrasonic::runnable_forwardcollision_obstacle_detection`: 초음파 거리와 `ForwardCollisionCalibration` 임계값으로 정지/차선 변경 요청(`DtoUltraSonicObstacle`)을 퍼블리시합니다.
   - `asw::adas_cod::runnable_adas_lateral`: LaneAngle에 비례 제어를 적용해 서보 명령을 결정합니다.
   - `asw::adas_cod::runnable_adas_longitudinal`: 초음파/신호등/IMU 텔레메트리를 활용해 DC 모터 속도를 결정합니다.
 
