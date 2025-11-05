@@ -711,7 +711,7 @@ pub fn smooth_local_path(
         return Err("스무딩 샘플 수는 2 이상이어야 합니다.".to_string());
     }
 
-    let origin = waypoints.first().ok_or("로컬 경로가 비어 있습니다.")?;
+    let origin_xy = state.position_map_xy;
     // 차량 자세는 IMU yaw(roll 보정) 값을 최우선으로 사용하고, 부족할 때만 궤적 기반 추정으로 보완한다.
     let mut heading = Some([state.yaw_rad.cos(), state.yaw_rad.sin()])
         .or_else(|| state.motion_heading_rad.map(|ang| [ang.cos(), ang.sin()]))
@@ -729,23 +729,21 @@ pub fn smooth_local_path(
     let tangent = heading;
     let normal = [-tangent[1], tangent[0]];
 
-    let mut s_values = Vec::with_capacity(waypoints.len());
-    let mut d_values = Vec::with_capacity(waypoints.len());
+    let mut s_values = Vec::with_capacity(waypoints.len() + 1);
+    let mut d_values = Vec::with_capacity(waypoints.len() + 1);
 
     let mut cumulative_s = 0.0;
-    let mut prev = [origin.position_xy[0] as f64, origin.position_xy[1] as f64];
+    let mut prev = origin_xy;
 
-    for (idx, wp) in waypoints.iter().enumerate() {
+    s_values.push(0.0);
+    d_values.push(0.0);
+
+    for wp in waypoints {
         let current = [wp.position_xy[0] as f64, wp.position_xy[1] as f64];
-        if idx > 0 {
-            cumulative_s += distance(prev, current);
-            prev = current;
-        }
+        cumulative_s += distance(prev, current);
+        prev = current;
 
-        let vec = [
-            current[0] - origin.position_xy[0] as f64,
-            current[1] - origin.position_xy[1] as f64,
-        ];
+        let vec = [current[0] - origin_xy[0], current[1] - origin_xy[1]];
         let d = vec[0] * normal[0] + vec[1] * normal[1];
 
         s_values.push(cumulative_s);
@@ -774,8 +772,8 @@ pub fn smooth_local_path(
         let s = max_s * t;
         let d = eval_quintic(&coeffs, s);
         let world = [
-            origin.position_xy[0] as f64 + s * tangent[0] + d * normal[0],
-            origin.position_xy[1] as f64 + s * tangent[1] + d * normal[1],
+            origin_xy[0] + s * tangent[0] + d * normal[0],
+            origin_xy[1] + s * tangent[1] + d * normal[1],
         ];
         samples.push([world[0] as f32, world[1] as f32]);
     }
