@@ -17,8 +17,9 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
     let calib = AdasPathGlobalCalibration::default();
     let scenario = LOCALIZATION_ACTIVE_SCENARIO;
 
-    let heading_cos_threshold =
-        (calib.obstacle_block_heading_tolerance_deg as f64).to_radians().cos();
+    let heading_cos_threshold = (calib.obstacle_block_heading_tolerance_deg as f64)
+        .to_radians()
+        .cos();
 
     let graph = match PathGraph::load(scenario.map, &calib) {
         Ok(graph) => graph,

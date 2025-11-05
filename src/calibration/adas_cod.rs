@@ -8,12 +8,16 @@ use std::time::Duration;
 /// 차선 각도 조향 제어 파라미터.
 /// 서보 각도 범위와 비례 제어 게인, 레이트 리밋 값을 포함한다.
 pub struct AdasLateralCalibration {
-    /// 비례 제어 게인: 서보각(도) = neutral + k * lane_angle(도)
-    pub lane_to_servo_gain: f64,
-    /// 5차 스무딩 경로 곡률을 서보각으로 변환하는 게인.
-    pub curvature_to_servo_gain: f64,
-    /// 횡방향 편차 보정 게인.
-    pub lateral_offset_gain: f64,
+    /// PID 비례 게인 (deg 명령 / m lateral error)
+    pub pid_kp: f64,
+    /// PID 적분 게인 (deg 명령 / (m·s))
+    pub pid_ki: f64,
+    /// PID 미분 게인 (deg 명령·s / m)
+    pub pid_kd: f64,
+    /// 적분 항 누적 한계 (m·s 단위)
+    pub pid_integral_limit: f64,
+    /// 횡오차 계산에 사용할 스무딩 샘플 인덱스(0-base)
+    pub pid_sample_index: usize,
     /// 서보 중립 각도(도)
     pub servo_neutral_deg: u32,
     /// 서보 최소/최대 각도(도)
@@ -28,9 +32,11 @@ pub struct AdasLateralCalibration {
 impl Default for AdasLateralCalibration {
     fn default() -> Self {
         Self {
-            lane_to_servo_gain: -5.0,
-            curvature_to_servo_gain: -1.0,
-            lateral_offset_gain: -3.0,
+            pid_kp: -50.0,
+            pid_ki: -2.0,
+            pid_kd: -8.0,
+            pid_integral_limit: 0.5,
+            pid_sample_index: 7,
             servo_neutral_deg: 90,
             servo_min_deg: 0,
             servo_max_deg: 180,

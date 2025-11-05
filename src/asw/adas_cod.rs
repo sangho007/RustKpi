@@ -6,7 +6,7 @@ use crate::asw::lib::adas_path_lib::curvature_from_smoothed_path;
 use crate::asw::lib::vs_trafficlight_lib::TrafficLightColor;
 use crate::calibration::{AdasLateralCalibration, AdasLongitudinalCalibration};
 use crate::rte::rte_dto::{
-    AdasLaneChangeState, DtoAdasSmoothedPath, DtoCamLaneAngle, DtoDcMotorCtrl, DtoServoCtrl,
+    AdasLaneChangeState, DtoAdasLocalPath, DtoAdasSmoothedPath, DtoDcMotorCtrl, DtoServoCtrl,
     DtoTrafficLight, DtoTrafficLightDirective, DtoUltraSonicObstacle, DtoUltraSonicRaw,
 };
 use crate::rte::rte_main::RteChannels;
@@ -16,35 +16,40 @@ use tokio::sync::broadcast::error::TryRecvError;
 use tokio::time;
 
 /// ADAS Lateral 제어 러너블.
-/// - 최신 차선 각도(laneAngle)를 읽어 비례 제어(P 제어)로 서보 목표각을 계산한다.
-/// - 과도한 변화를 막기 위해 `max_servo_delta_deg`만큼 레이트 리밋을 적용한다.
+/// - 로컬 경로를 레퍼런스로, 스무딩 경로를 추종 대상으로 사용해 횡오차를 계산한다.
+/// - PID 제어기를 통해 서보 목표각을 계산하고, `max_servo_delta_deg` 레이트 리밋을 적용한다.
 /// - 결과를 `control.servo_tx` 채널로 퍼블리시한다.
 pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     let calib = AdasLateralCalibration::default();
-    let mut lane_rx = channels.camera.lane_angle_tx.subscribe();
+    let mut local_rx = channels.path.local_tx.subscribe();
     let mut path_rx = channels.path.smoothed_tx.subscribe();
     let servo_tx = channels.control.servo_tx.clone();
 
     // 제어 루프 주기(기본 50ms)
-    let mut tick = time::interval(std::time::Duration::from_millis(50));
+    let control_period = Duration::from_millis(50);
+    let mut tick = time::interval(control_period);
+    let dt_sec = control_period.as_secs_f64();
 
     // 최신 신호 캐시
-    let mut latest_lane: Option<DtoCamLaneAngle> = None;
+    let mut latest_local: Option<Arc<DtoAdasLocalPath>> = None;
     let mut latest_path: Option<Arc<DtoAdasSmoothedPath>> = None;
     let mut last_cmd_deg: u32 = calib.servo_neutral_deg;
     let mut last_log: Instant = Instant::now();
+    let mut integral_error: f64 = 0.0;
+    let mut prev_error: Option<f64> = None;
 
     loop {
         // 새 메시지가 도착했으면 최신으로 드레인
-        match lane_rx.try_recv() {
+        match local_rx.try_recv() {
             Ok(dto) => {
-                latest_lane = Some(dto.as_ref().clone());
-                while let Ok(newer) = lane_rx.try_recv() {
-                    latest_lane = Some(newer.as_ref().clone());
+                let mut newest = dto;
+                while let Ok(newer) = local_rx.try_recv() {
+                    newest = newer;
                 }
+                latest_local = Some(newest);
             }
             Err(TryRecvError::Lagged(n)) => {
-                eprintln!("[{}] ADAS lateral lane_angle lagged by {}", id, n);
+                eprintln!("[{}] ADAS lateral local_path lagged by {}", id, n);
             }
             Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {
                 // Closed는 다음 루프에서 publish 없이 진행; Empty는 무시
@@ -68,42 +73,50 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
         // 제어 주기 동기화
         tick.tick().await;
 
-        let lane_state = latest_path
-            .as_deref()
-            .map(|path| path.lane_change_state);
+        let lane_state = latest_path.as_deref().map(|path| path.lane_change_state);
 
-        let curvature = if let Some(path) = latest_path.as_deref() {
-            match curvature_from_smoothed_path(path) {
-                Ok(value) => value,
-                Err(err) => {
-                    eprintln!("[{}] ADAS lateral curvature 계산 실패: {}", id, err);
-                    0.0
-                }
-            }
-        } else {
-            0.0
-        };
+        let mut pid_output = 0.0;
+        let mut current_error = None;
 
-        let mut lane_offset = latest_lane
-            .as_ref()
-            .map(|lane| lane.lateral_offset)
-            .unwrap_or(0.0);
-        let mut lane_angle = latest_lane.as_ref().map(|lane| lane.angle).unwrap_or(0.0);
+        if let (Some(local_path), Some(smoothed_path)) =
+            (latest_local.as_deref(), latest_path.as_deref())
+        {
+            current_error =
+                compute_lateral_error(local_path, smoothed_path, calib.pid_sample_index);
+        }
+
         if let Some(state) = lane_state {
             if !matches!(
                 state,
                 AdasLaneChangeState::InnerCruise | AdasLaneChangeState::OuterCruise
             ) {
-                lane_offset = 0.0;
-                lane_angle = 0.0;
+                integral_error = 0.0;
+                prev_error = None;
+                current_error = Some(0.0);
             }
         }
 
-        let target_angle = calib.curvature_to_servo_gain * curvature
-            + calib.lane_to_servo_gain * lane_angle
-            + calib.lateral_offset_gain * lane_offset;
+        if let Some(error) = current_error {
+            integral_error += error * dt_sec;
+            if calib.pid_integral_limit > 0.0 {
+                let limit = calib.pid_integral_limit;
+                integral_error = integral_error.clamp(-limit, limit);
+            }
+            let derivative = if let Some(prev) = prev_error {
+                (error - prev) / dt_sec
+            } else {
+                0.0
+            };
+            prev_error = Some(error);
+            pid_output =
+                calib.pid_kp * error + calib.pid_ki * integral_error + calib.pid_kd * derivative;
+        } else {
+            // 데이터 부족 시 PID 상태를 리셋해 드리프트를 방지한다.
+            integral_error = 0.0;
+            prev_error = None;
+        }
 
-        let base_cmd = calib.servo_neutral_deg as f64 + target_angle;
+        let base_cmd = calib.servo_neutral_deg as f64 + pid_output;
         let target_deg = base_cmd
             .round()
             .clamp(calib.servo_min_deg as f64, calib.servo_max_deg as f64)
@@ -132,20 +145,15 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
 
         // 1초마다 현재 제어 상태를 요약해 로깅한다.
         if last_log.elapsed() > std::time::Duration::from_secs(1) {
-            let lane_angle_display = latest_lane
-                .as_ref()
-                .map(|lane| format!("{:.2}", lane.angle))
-                .unwrap_or_else(|| "--".to_string());
-            let lane_offset_display = latest_lane
-                .as_ref()
-                .map(|lane| format!("{:.2}", lane.lateral_offset))
+            let error_display = current_error
+                .map(|err| format!("{:.3}", err))
                 .unwrap_or_else(|| "--".to_string());
             let state_display = lane_state
                 .map(|state| format!("{:?}", state))
                 .unwrap_or_else(|| "--".to_string());
             println!(
-                "[{}] Lateral: curvature={:.4}, lane_angle={} offset={} state={} -> servo={}deg",
-                id, curvature, lane_angle_display, lane_offset_display, state_display, last_cmd_deg
+                "[{}] Lateral PID: error={} integ={:.3} state={} -> servo={}deg",
+                id, error_display, integral_error, state_display, last_cmd_deg
             );
             last_log = Instant::now();
         }
@@ -230,8 +238,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
                 }
             }
             if saw_ready_signal && ev_ready_deadline.is_none() {
-                ev_ready_deadline =
-                    Some(Instant::now() + Duration::from_secs(EV_READY_HOLD_SECS));
+                ev_ready_deadline = Some(Instant::now() + Duration::from_secs(EV_READY_HOLD_SECS));
                 println!(
                     "[{}] Longitudinal: EV READY 감지, {}초 대기 후 주행을 시작합니다.",
                     id, EV_READY_HOLD_SECS
@@ -240,7 +247,10 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             if let Some(deadline) = ev_ready_deadline {
                 if Instant::now() >= deadline {
                     ev_ready_released = true;
-                    println!("[{}] Longitudinal: EV READY 게이트 해제, 주행 제어를 시작합니다.", id);
+                    println!(
+                        "[{}] Longitudinal: EV READY 게이트 해제, 주행 제어를 시작합니다.",
+                        id
+                    );
                 }
             }
         }
@@ -490,4 +500,54 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             last_log = Instant::now();
         }
     }
+}
+
+fn compute_lateral_error(
+    local_path: &DtoAdasLocalPath,
+    smoothed_path: &DtoAdasSmoothedPath,
+    sample_index: usize,
+) -> Option<f64> {
+    if local_path.waypoints.is_empty() || smoothed_path.samples_xy.is_empty() {
+        return None;
+    }
+
+    let idx_sample = sample_index.min(smoothed_path.samples_xy.len().saturating_sub(1));
+    let idx_ref = sample_index.min(local_path.waypoints.len().saturating_sub(1));
+
+    let sample = smoothed_path.samples_xy.get(idx_sample)?;
+    let reference = local_path.waypoints.get(idx_ref)?;
+
+    let reference_pos = [
+        reference.position_xy[0] as f64,
+        reference.position_xy[1] as f64,
+    ];
+
+    // 레퍼런스 경로의 접선 벡터를 계산해 법선(횡방향) 축을 얻는다.
+    let tangent_vec = if idx_ref + 1 < local_path.waypoints.len() {
+        let next = &local_path.waypoints[idx_ref + 1];
+        [
+            next.position_xy[0] as f64 - reference_pos[0],
+            next.position_xy[1] as f64 - reference_pos[1],
+        ]
+    } else if idx_ref > 0 {
+        let prev = &local_path.waypoints[idx_ref - 1];
+        [
+            reference_pos[0] - prev.position_xy[0] as f64,
+            reference_pos[1] - prev.position_xy[1] as f64,
+        ]
+    } else {
+        [1.0, 0.0]
+    };
+
+    let norm = (tangent_vec[0] * tangent_vec[0] + tangent_vec[1] * tangent_vec[1]).sqrt();
+    let tangent = if norm < 1e-6 {
+        [1.0, 0.0]
+    } else {
+        [tangent_vec[0] / norm, tangent_vec[1] / norm]
+    };
+    let normal = [-tangent[1], tangent[0]];
+
+    let actual = [sample[0] as f64, sample[1] as f64];
+    let diff = [actual[0] - reference_pos[0], actual[1] - reference_pos[1]];
+    Some(diff[0] * normal[0] + diff[1] * normal[1])
 }

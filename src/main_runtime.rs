@@ -426,8 +426,12 @@ fn maybe_publish_path_preview(
     if last_sent.elapsed() < PATH_PREVIEW_INTERVAL {
         return;
     }
-    let frame =
-        match build_path_preview_frame(global_path, local_path, smoothed_path, localization_state) {
+    let frame = match build_path_preview_frame(
+        global_path,
+        local_path,
+        smoothed_path,
+        localization_state,
+    ) {
         Some(frame) => frame,
         None => return,
     };

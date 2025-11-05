@@ -178,9 +178,7 @@ fn try_publish_smoothed_path(
 
     let lane_state = determine_lane_change_state(local_path);
 
-    let skip = calib
-        .smoothing_skip_head
-        .min(local_path.waypoints.len());
+    let skip = calib.smoothing_skip_head.min(local_path.waypoints.len());
     let smoothing_input = &local_path.waypoints[skip..];
     let smoothing_source = if smoothing_input.len() >= 6 {
         smoothing_input

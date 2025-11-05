@@ -220,13 +220,7 @@ pub fn process_imu_sample(
         let imu_ypr_deg = pose
             .orientation_yaw_roll_pitch
             .as_ref()
-            .map(|ori| {
-                (
-                    rad_to_deg(ori[0]),
-                    rad_to_deg(ori[1]),
-                    rad_to_deg(ori[2]),
-                )
-            });
+            .map(|ori| (rad_to_deg(ori[0]), rad_to_deg(ori[1]), rad_to_deg(ori[2])));
         // 주기별로 핵심 값을 출력해 센서 데이터 흐름을 확인한다.
         println!(
             "[{}] pose=({:.3}, {:.3}) yaw={:.2} deg (src={:?}) motion={} imu_ypr={}",
