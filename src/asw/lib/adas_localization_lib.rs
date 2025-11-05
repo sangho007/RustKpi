@@ -16,7 +16,6 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 pub const MOTION_HEADING_MIN_STEP_M: f64 = 0.01; // 1cm 이상 움직였을 때만 헤딩 계산.
-pub const AXIS_SELECTION_MAX_ERROR_RAD: f64 = PI / 4.0; // 45도 이내면 동일 축으로 간주.
 pub const IMU_ROLL_YAW_OFFSET_RAD: f64 = PI / 2.0; // 롤 값이 차량 yaw보다 90도 뒤쳐져 있는 경우.
 
 /// ADAS Localization에서 반복적으로 사용하는 런타임 상태 묶음.
@@ -185,56 +184,18 @@ pub fn process_imu_sample(
 
     let mut yaw_candidate: Option<(f64, LocalizationYawSource)> = None;
     if let Some(orientation) = pose.orientation_yaw_roll_pitch.as_ref() {
-        if let Some(axis) = runtime.yaw_axis {
-            // 이미 축이 선택되어 있으면 해당 축과 bias로 yaw를 바로 계산한다.
-            let raw = axis.extract(orientation);
-            yaw_candidate = Some((wrap_angle(raw + runtime.yaw_bias), axis.to_source()));
-        } else if let Some(heading) = motion_heading {
-            // 아직 축이 없다면 이동 방향과 가장 가까운 오일러 축을 찾는다.
-            let candidates = [
-                (OrientationAxis::Yaw, orientation[0]),
-                (OrientationAxis::Pitch, orientation[2]),
-                (OrientationAxis::Roll, orientation[1]),
-            ];
-            let mut best: Option<(OrientationAxis, f64, f64)> = None;
-            for (axis, raw) in candidates {
-                let diff = wrap_angle(heading - raw);
-                if best
-                    .map(|(_, _, best_err)| diff.abs() < best_err.abs())
-                    .unwrap_or(true)
-                {
-                    best = Some((axis, raw, diff));
-                }
-            }
-            if let Some((axis, raw, diff)) = best {
-                if diff.abs() <= AXIS_SELECTION_MAX_ERROR_RAD {
-                    runtime.yaw_axis = Some(axis);
-                    runtime.yaw_bias = diff;
-                    println!(
-                        "[{}] Localization yaw 축을 {:?}로 선택 (bias {:.2} deg)",
-                        id,
-                        axis,
-                        rad_to_deg(runtime.yaw_bias)
-                    );
-                    // 선택된 축과 편차를 이용해 보정된 yaw를 기록한다.
-                    yaw_candidate = Some((wrap_angle(raw + runtime.yaw_bias), axis.to_source()));
-                }
-            }
-        }
+        // 차량 yaw는 IMU 롤 축을 기준으로 90도 오프셋이 존재한다고 가정한다.
+        let raw_roll = orientation[1];
+        let yaw = wrap_angle(raw_roll + IMU_ROLL_YAW_OFFSET_RAD);
+        yaw_candidate = Some((yaw, LocalizationYawSource::ImuRoll));
+        runtime.yaw_axis = Some(OrientationAxis::Roll);
+        runtime.yaw_bias = IMU_ROLL_YAW_OFFSET_RAD;
     }
 
     if yaw_candidate.is_none() {
-        if let Some(heading) = motion_heading {
-            // 1순위: 충분히 이동했다면 heading을 yaw로 사용한다.
-            yaw_candidate = Some((wrap_angle(heading), LocalizationYawSource::MotionEstimate));
-        } else if let Some((prev_yaw, prev_src)) = runtime.last_yaw.as_ref() {
-            // 2순위: 직전 yaw를 유지한다.
+        if let Some((prev_yaw, prev_src)) = runtime.last_yaw.as_ref() {
+            // 센서값이 없으면 직전 yaw를 유지한다.
             yaw_candidate = Some((*prev_yaw, *prev_src));
-        } else if let Some(orientation) = pose.orientation_yaw_roll_pitch.as_ref() {
-            // 3순위: IMU 롤 값이 차량 yaw에 대응한다고 가정하고 90도 오프셋을 적용한다.
-            let raw = orientation[1];
-            let yaw = wrap_angle(raw + IMU_ROLL_YAW_OFFSET_RAD);
-            yaw_candidate = Some((yaw, LocalizationYawSource::ImuRoll));
         }
     }
 
