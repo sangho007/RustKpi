@@ -13,6 +13,24 @@ use tokio::{select, sync::broadcast::error::RecvError};
 
 /// GUI 프리뷰를 활성화할지 여부.
 const DEBUG_ON: bool = true;
+/// 터미널 로그 출력을 활성화할지 여부.
+const TERMINAL_OUTPUT_ON: bool = true;
+
+macro_rules! runtime_println {
+    ($($arg:tt)*) => {
+        if TERMINAL_OUTPUT_ON {
+            ::std::println!($($arg)*);
+        }
+    };
+}
+
+macro_rules! runtime_eprintln {
+    ($($arg:tt)*) => {
+        if TERMINAL_OUTPUT_ON {
+            ::std::eprintln!($($arg)*);
+        }
+    };
+}
 const PATH_PREVIEW_INTERVAL: Duration = Duration::from_millis(200);
 const PATH_CANVAS_SIZE: i32 = 640;
 
@@ -25,7 +43,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
     let localization_channels = channels.localization.clone();
 
     // 사용자에게 실행 상태를 안내한다.
-    println!("== 시스템 실행 중... (GUI 창에서 'q'를 누르면 종료) ==");
+    runtime_println!("== 시스템 실행 중... (GUI 창에서 'q'를 누르면 종료) ==");
 
     // 디버그 모드에서는 프리뷰 스레드를 띄워 GUI를 활성화한다.
     let (mut preview_tx, mut preview_event_rx, preview_handle) = if DEBUG_ON {
@@ -70,9 +88,9 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
             // 사용자 Ctrl-C 입력을 감지한다. (우선순위를 높여 즉시 종료한다.)
             result = &mut ctrl_c => {
                 if let Err(err) = result {
-                    eprintln!("[MAIN] Failed to receive Ctrl-C signal: {}", err);
+                    runtime_eprintln!("[MAIN] Failed to receive Ctrl-C signal: {}", err);
                 } else {
-                    println!("[MAIN] Ctrl-C received, shutting down...");
+                    runtime_println!("[MAIN] Ctrl-C received, shutting down...");
                 }
                 break 'main_loop;
             },
@@ -97,10 +115,10 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                     }
                 }
                 Err(RecvError::Lagged(n)) => {
-                    eprintln!("[MAIN] raw frame lagged by {}", n);
+                    runtime_eprintln!("[MAIN] raw frame lagged by {}", n);
                 }
                 Err(RecvError::Closed) => {
-                    eprintln!("[MAIN] raw frame channel closed.");
+                    runtime_eprintln!("[MAIN] raw frame channel closed.");
                     break 'main_loop;
                 }
             },
@@ -128,16 +146,16 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                                 let _ = tx.send(PreviewMessage::Processed(payload));
                             }
                             Err(err) => {
-                                eprintln!("[GUI] Failed to read processed stride: {}", err);
+                                runtime_eprintln!("[GUI] Failed to read processed stride: {}", err);
                             }
                         }
                     }
                 }
                 Err(RecvError::Lagged(n)) => {
-                    eprintln!("[MAIN] Processed frame lagged by {}", n);
+                    runtime_eprintln!("[MAIN] Processed frame lagged by {}", n);
                 }
                 Err(RecvError::Closed) => {
-                    eprintln!("[MAIN] Processed frame channel closed.");
+                    runtime_eprintln!("[MAIN] Processed frame channel closed.");
                     break 'main_loop;
                 }
             },
@@ -165,16 +183,16 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                                 let _ = tx.send(PreviewMessage::Bird(payload));
                             }
                             Err(err) => {
-                                eprintln!("[GUI] Failed to read bird-eye stride: {}", err);
+                                runtime_eprintln!("[GUI] Failed to read bird-eye stride: {}", err);
                             }
                         }
                     }
                 }
                 Err(RecvError::Lagged(n)) => {
-                    eprintln!("[MAIN] Bird eye stream lagged by {}", n);
+                    runtime_eprintln!("[MAIN] Bird eye stream lagged by {}", n);
                 }
                 Err(RecvError::Closed) => {
-                    eprintln!("[MAIN] Bird eye channel closed.");
+                    runtime_eprintln!("[MAIN] Bird eye channel closed.");
                     break 'main_loop;
                 }
             },
@@ -195,10 +213,10 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                     );
                 }
                 Err(RecvError::Lagged(n)) => {
-                    eprintln!("[MAIN] Global path lagged by {}", n);
+                    runtime_eprintln!("[MAIN] Global path lagged by {}", n);
                 }
                 Err(RecvError::Closed) => {
-                    println!("[MAIN] Global path channel closed, shutting down...");
+                    runtime_println!("[MAIN] Global path channel closed, shutting down...");
                     break 'main_loop;
                 }
             },
@@ -219,10 +237,10 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                     );
                 }
                 Err(RecvError::Lagged(n)) => {
-                    eprintln!("[MAIN] Local path lagged by {}", n);
+                    runtime_eprintln!("[MAIN] Local path lagged by {}", n);
                 }
                 Err(RecvError::Closed) => {
-                    println!("[MAIN] Local path channel closed, shutting down...");
+                    runtime_println!("[MAIN] Local path channel closed, shutting down...");
                     break 'main_loop;
                 }
             },
@@ -230,13 +248,13 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
             // 차선 각도 결과를 로그로 출력한다.
             result = lane_angle_rx.recv() => match result {
                 Ok(_lane_angle) => {
-                    //println!("Angle: {}, alive_cnt: {}", _lane_angle.angle, _lane_angle.alive_cnt);
+                    //runtime_println!("Angle: {}, alive_cnt: {}", _lane_angle.angle, _lane_angle.alive_cnt);
                 }
                 Err(RecvError::Lagged(n)) => {
-                    eprintln!("[MAIN] Lane angle lagged by {}", n);
+                    runtime_eprintln!("[MAIN] Lane angle lagged by {}", n);
                 }
                 Err(RecvError::Closed) => {
-                    eprintln!("[MAIN] Lane angle channel closed.");
+                    runtime_eprintln!("[MAIN] Lane angle channel closed.");
                     break 'main_loop;
                 }
             },
@@ -244,13 +262,13 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
             // 초음파 거리 정보를 출력한다.
             result = distance_rx.recv() => match result {
                 Ok(distance) => {
-                    println!("distance: {}, alive_cnt: {}", distance.distance, distance.alive_cnt);
+                    runtime_println!("distance: {}, alive_cnt: {}", distance.distance, distance.alive_cnt);
                 }
                 Err(RecvError::Lagged(n)) => {
-                    eprintln!("[MAIN] Uss lagged by {}", n);
+                    runtime_eprintln!("[MAIN] Uss lagged by {}", n);
                 }
                 Err(RecvError::Closed) => {
-                    eprintln!("[MAIN] Uss angle channel closed.");
+                    runtime_eprintln!("[MAIN] Uss angle channel closed.");
                     break 'main_loop;
                 }
             },
@@ -263,7 +281,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                         latest = newer;
                     }
                     if latest.arrived {
-                        println!(
+                        runtime_println!(
                             "[MAIN] Destination reached (timestamp_ns={}), shutting down...",
                             latest.timestamp_ns
                         );
@@ -271,10 +289,10 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                     }
                 }
                 Err(RecvError::Lagged(n)) => {
-                    eprintln!("[MAIN] Localization arrival lagged by {}", n);
+                    runtime_eprintln!("[MAIN] Localization arrival lagged by {}", n);
                 }
                 Err(RecvError::Closed) => {
-                    println!("[MAIN] Localization arrival channel closed, shutting down...");
+                    runtime_println!("[MAIN] Localization arrival channel closed, shutting down...");
                     break 'main_loop;
                 }
             },
@@ -296,10 +314,10 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                     );
                 }
                 Err(RecvError::Lagged(n)) => {
-                    eprintln!("[MAIN] Localization state lagged by {}", n);
+                    runtime_eprintln!("[MAIN] Localization state lagged by {}", n);
                 }
                 Err(RecvError::Closed) => {
-                    println!("[MAIN] Localization state channel closed, shutting down...");
+                    runtime_println!("[MAIN] Localization state channel closed, shutting down...");
                     break 'main_loop;
                 }
             },
@@ -315,7 +333,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                         .gyro
                         .as_ref()
                         .and_then(|gyro| gyro.body);
-                    println!(
+                    runtime_println!(
                         "[IMU] header={{stamp_ns={}, dt_ns={}, seq={}, session_id={:?}, clock_domain={:?}, frame_id={:?}, child_frame_id={:?}}} alive_cnt={} position_world={:?} gyro_body={:?}",
                         header.stamp_ns,
                         header.dt_ns,
@@ -330,10 +348,10 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                     );
                 }
                 Err(RecvError::Lagged(n)) => {
-                    eprintln!("[MAIN] IMU stream lagged by {}", n);
+                    runtime_eprintln!("[MAIN] IMU stream lagged by {}", n);
                 }
                 Err(RecvError::Closed) => {
-                    eprintln!("[MAIN] IMU channel closed.");
+                    runtime_eprintln!("[MAIN] IMU channel closed.");
                     break 'main_loop;
                 }
             },
@@ -342,7 +360,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
         // GUI에서 종료 이벤트를 요청하면 즉시 빠져나간다.
         if let Some(event_rx) = preview_event_rx.as_mut() {
             if let Ok(PreviewEvent::Quit) = event_rx.try_recv() {
-                println!("[MAIN] Preview requested quit, shutting down...");
+                runtime_println!("[MAIN] Preview requested quit, shutting down...");
                 break 'main_loop;
             }
         }
@@ -356,11 +374,11 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
     // 프리뷰 스레드를 종료까지 대기한다.
     if let Some(handle) = preview_handle {
         if let Err(err) = handle.join() {
-            eprintln!("[MAIN] Failed to join preview thread: {:?}", err);
+            runtime_eprintln!("[MAIN] Failed to join preview thread: {:?}", err);
         }
     }
 
-    println!("== 시뮬레이션 종료 ==");
+    runtime_println!("== 시뮬레이션 종료 ==");
     Ok(())
 }
 
@@ -611,7 +629,7 @@ fn mat_color_format(mat: &Mat) -> ColorFormat {
         4 => ColorFormat::Rgba,
         ch => {
             // 지원하지 않는 채널 수는 경고를 남기고 BGR로 폴백한다.
-            eprintln!("[GUI] Unsupported channel count for preview: {}", ch);
+            runtime_eprintln!("[GUI] Unsupported channel count for preview: {}", ch);
             ColorFormat::Bgr
         }
     }
