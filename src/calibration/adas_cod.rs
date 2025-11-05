@@ -32,7 +32,7 @@ pub struct AdasLateralCalibration {
 impl Default for AdasLateralCalibration {
     fn default() -> Self {
         Self {
-            pid_kp: 150.0,
+            pid_kp: 300.0,
             pid_ki: 2.0,
             pid_kd: 8.0,
             pid_integral_limit: 0.5,
