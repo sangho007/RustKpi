@@ -856,24 +856,6 @@ fn curvature_from_samples(samples: &[[f32; 2]]) -> Result<f64, &'static str> {
     let coeffs = fit_quintic_polynomial(&s_values, &d_values)?;
     let curvature = 2.0 * coeffs[2];
 
-    if curvature.abs() > 1.0 {
-        let sample_count = samples.len();
-        let max_s = s_values.last().copied().unwrap_or(0.0);
-        let max_d = d_values.iter().fold(0.0f64, |acc, val| acc.max(val.abs()));
-        eprintln!(
-            "[ADAS][curv_debug] curvature={:.4} samples={} max_s={:.4} max_d={:.4} origin=({:.3},{:.3}) heading=({:.3},{:.3}) coeffs={:?}",
-            curvature,
-            sample_count,
-            max_s,
-            max_d,
-            origin[0],
-            origin[1],
-            tangent[0],
-            tangent[1],
-            coeffs
-        );
-    }
-
     Ok(curvature)
 }
 
