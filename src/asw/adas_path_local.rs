@@ -7,7 +7,7 @@ use crate::calibration::{
 };
 use crate::rte::rte_dto::{
     AdasLaneChangeState, DtoAdasGlobalPath, DtoAdasLocalPath, DtoAdasSmoothedPath,
-    DtoLocalizationState,
+    DtoLocalizationState, DtoPathWaypoint,
 };
 use crate::rte::rte_main::RteChannels;
 use std::sync::Arc;
@@ -120,7 +120,7 @@ pub async fn runnable_adas_path_smoothing(id: &'static str, channels: RteChannel
                             latest_state.as_deref(),
                             &mut alive_cnt,
                             &mut last_log,
-                        );
+                        ).await;
                     }
                     Err(RecvError::Lagged(skipped)) => {
                         eprintln!("[{}] 스무딩: 로컬 경로 {}개 누락", id, skipped);
@@ -147,7 +147,7 @@ pub async fn runnable_adas_path_smoothing(id: &'static str, channels: RteChannel
                             latest_state.as_deref(),
                             &mut alive_cnt,
                             &mut last_log,
-                        );
+                        ).await;
                     }
                     Err(RecvError::Lagged(skipped)) => {
                         eprintln!("[{}] 스무딩: Localization {}개 누락", id, skipped);
@@ -162,7 +162,7 @@ pub async fn runnable_adas_path_smoothing(id: &'static str, channels: RteChannel
     }
 }
 
-fn try_publish_smoothed_path(
+async fn try_publish_smoothed_path(
     id: &str,
     calib: &AdasPathLocalCalibration,
     smooth_tx: &tokio::sync::broadcast::Sender<Arc<DtoAdasSmoothedPath>>,
@@ -183,8 +183,20 @@ fn try_publish_smoothed_path(
     let skip = calib.smoothing_skip_head.min(max_skip);
     let smoothing_input = &local_path.waypoints[skip..];
 
+    let sample_count = calib.smoothing_sample_count;
+    let state_clone = state.clone();
+
     let samples = if smoothing_input.len() >= min_samples {
-        match smooth_local_path(smoothing_input, state, calib.smoothing_sample_count) {
+        let trimmed_wp = smoothing_input.to_vec();
+        match blocking_smooth_local_path(
+            id,
+            "trimmed",
+            trimmed_wp,
+            state_clone.clone(),
+            sample_count,
+        )
+        .await
+        {
             Ok(samples) => samples,
             Err(err) => {
                 eprintln!("[{}] 스무딩 실패: {} (원본 경로로 대체)", id, err);
@@ -195,7 +207,15 @@ fn try_publish_smoothed_path(
             }
         }
     } else if local_path.waypoints.len() >= min_samples {
-        match smooth_local_path(&local_path.waypoints, state, calib.smoothing_sample_count) {
+        match blocking_smooth_local_path(
+            id,
+            "full",
+            local_path.waypoints.clone(),
+            state_clone,
+            sample_count,
+        )
+        .await
+        {
             Ok(samples) => samples,
             Err(err) => {
                 eprintln!("[{}] 스무딩 실패: {} (원본 경로로 대체)", id, err);
@@ -258,4 +278,33 @@ fn determine_lane_change_state(local_path: &DtoAdasLocalPath) -> AdasLaneChangeS
             LocalizationLane::Outer => AdasLaneChangeState::OuterCruise,
         },
     }
+}
+
+async fn blocking_smooth_local_path(
+    id: &str,
+    label: &str,
+    waypoints: Vec<DtoPathWaypoint>,
+    state: DtoLocalizationState,
+    sample_count: usize,
+) -> Result<Vec<[f32; 2]>, String> {
+    let id_owned = id.to_string();
+    let label_owned = label.to_string();
+    tokio::task::spawn_blocking(move || {
+        let started = Instant::now();
+        let result = smooth_local_path(&waypoints, &state, sample_count);
+        let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+        if elapsed_ms >= 1.0 {
+            println!(
+                "[{}] smooth_local_path[{}]: {:.3}ms (input={} samples={})",
+                id_owned,
+                label_owned,
+                elapsed_ms,
+                waypoints.len(),
+                sample_count
+            );
+        }
+        result
+    })
+    .await
+    .map_err(|err| format!("smooth_local_path 블로킹 태스크 실패: {}", err))?
 }
