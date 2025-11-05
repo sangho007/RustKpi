@@ -570,22 +570,22 @@ fn build_path_preview_frame(
     min_y -= pad_y;
     max_y += pad_y;
 
+    let span_x = (max_x - min_x).max(f64::EPSILON);
+    let span_y = (max_y - min_y).max(f64::EPSILON);
     let draw_width = (PATH_CANVAS_SIZE as f64) - 40.0;
     let draw_height = (PATH_CANVAS_SIZE as f64) - 40.0;
-    let scale_x = if (max_x - min_x).abs() < f64::EPSILON {
-        1.0
-    } else {
-        draw_width / (max_x - min_x)
-    };
-    let scale_y = if (max_y - min_y).abs() < f64::EPSILON {
-        1.0
-    } else {
-        draw_height / (max_y - min_y)
-    };
+    let scale_x = draw_width / span_x;
+    let scale_y = draw_height / span_y;
+    let scale = scale_x.min(scale_y).max(f64::MIN_POSITIVE);
+
+    let actual_width = span_x * scale;
+    let actual_height = span_y * scale;
+    let offset_x = 20.0 + (draw_width - actual_width) / 2.0;
+    let offset_y = 20.0 + (draw_height - actual_height) / 2.0;
 
     let to_point = |x: f64, y: f64| -> Point {
-        let mut px = ((x - min_x) * scale_x + 20.0).round() as i32;
-        let mut py = ((draw_height - (y - min_y) * scale_y) + 20.0).round() as i32;
+        let mut px = ((x - min_x) * scale + offset_x).round() as i32;
+        let mut py = (((max_y - y) * scale) + offset_y).round() as i32;
         let max_coord = PATH_CANVAS_SIZE - 1;
         px = px.clamp(0, max_coord);
         py = py.clamp(0, max_coord);
