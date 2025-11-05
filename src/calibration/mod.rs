@@ -17,5 +17,5 @@ pub use adas_localization::{
     LocalizationDestination, LocalizationLane, LocalizationMapId, LocalizationMapPreset,
     LocalizationStart,
 };
-pub use adas_path::{AdasPathGlobalCalibration, AdasPathLocalCalibration};
+pub use adas_path::{AdasPathGlobalCalibration, AdasPathLocalCalibration, GlobalPathPlanner};
 pub use lane::{LaneCalibration, LaneCalibrationPreset, camera};

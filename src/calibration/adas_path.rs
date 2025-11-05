@@ -3,6 +3,15 @@
 
 use std::time::Duration;
 
+/// 전역 경로 탐색 시 사용할 알고리즘.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GlobalPathPlanner {
+    /// 기존 격자 기반 A*.
+    AStar,
+    /// 차량 헤딩을 상태에 포함하는 하이브리드 A*.
+    HybridAStar,
+}
+
 /// 전역 경로 탐색 매개변수 묶음.
 #[derive(Clone, Debug)]
 pub struct AdasPathGlobalCalibration {
@@ -42,6 +51,8 @@ pub struct AdasPathGlobalCalibration {
     pub obstacle_block_timeout: Duration,
     /// 장애물 차단 시 차량 헤딩과 비교할 허용 각도(도 단위).
     pub obstacle_block_heading_tolerance_deg: f32,
+    /// 전역 경로 탐색에 사용할 알고리즘.
+    pub global_planner: GlobalPathPlanner,
 }
 
 impl Default for AdasPathGlobalCalibration {
@@ -65,6 +76,7 @@ impl Default for AdasPathGlobalCalibration {
             obstacle_block_margin_m: 0.2,
             obstacle_block_timeout: Duration::from_millis(500),
             obstacle_block_heading_tolerance_deg: 10.0,
+            global_planner: GlobalPathPlanner::HybridAStar,
         }
     }
 }

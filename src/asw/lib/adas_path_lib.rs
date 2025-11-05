@@ -2,7 +2,8 @@
 //! Python A* 구현(`tools/waypoint_graph_path_plot.py`)을 참조해 러스트로 포팅한 버전이다.
 
 use crate::calibration::{
-    AdasPathGlobalCalibration, AdasPathLocalCalibration, LocalizationLane, LocalizationMapId,
+    AdasPathGlobalCalibration, AdasPathLocalCalibration, GlobalPathPlanner, LocalizationLane,
+    LocalizationMapId,
 };
 use crate::rte::rte_dto::{
     DtoAdasGlobalPath, DtoAdasLocalPath, DtoAdasSmoothedPath, DtoLocalizationState, DtoPathWaypoint,
@@ -10,6 +11,7 @@ use crate::rte::rte_dto::{
 use serde::Deserialize;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::f64::consts::PI;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
@@ -78,6 +80,51 @@ pub struct PathGraph {
 }
 
 impl PathGraph {
+    pub fn plan_path(
+        &self,
+        algorithm: GlobalPathPlanner,
+        start: NodeKey,
+        goal: NodeKey,
+        blocked: &HashSet<NodeKey>,
+        lane_change_penalty: f64,
+        max_lane_changes: u32,
+    ) -> Result<PlannedPath, String> {
+        self.validate_plan_request(start, goal, blocked)?;
+
+        match algorithm {
+            GlobalPathPlanner::AStar => {
+                self.plan_path_astar(start, goal, blocked, lane_change_penalty, max_lane_changes)
+            }
+            GlobalPathPlanner::HybridAStar => {
+                self.plan_path_hybrid(start, goal, blocked, lane_change_penalty, max_lane_changes)
+            }
+        }
+    }
+
+    fn validate_plan_request(
+        &self,
+        start: NodeKey,
+        goal: NodeKey,
+        blocked: &HashSet<NodeKey>,
+    ) -> Result<(), String> {
+        if self.waypoint(start).is_none() {
+            return Err(format!(
+                "시작 waypoint가 지도에 없습니다: {:?}:{:?}",
+                start.lane, start.index
+            ));
+        }
+        if self.waypoint(goal).is_none() {
+            return Err(format!(
+                "목적지 waypoint가 지도에 없습니다: {:?}:{:?}",
+                goal.lane, goal.index
+            ));
+        }
+        if blocked.contains(&goal) {
+            return Err("목적지 waypoint가 장애물로 차단되었습니다.".to_string());
+        }
+        Ok(())
+    }
+
     pub fn load(
         map_id: LocalizationMapId,
         calib: &AdasPathGlobalCalibration,
@@ -167,7 +214,7 @@ impl PathGraph {
             .map(|(_, idx)| NodeKey { lane, index: idx })
     }
 
-    pub fn plan_path(
+    fn plan_path_astar(
         &self,
         start: NodeKey,
         goal: NodeKey,
@@ -175,22 +222,6 @@ impl PathGraph {
         lane_change_penalty: f64,
         max_lane_changes: u32,
     ) -> Result<PlannedPath, String> {
-        if self.waypoint(start).is_none() {
-            return Err(format!(
-                "시작 waypoint가 지도에 없습니다: {:?}:{:?}",
-                start.lane, start.index
-            ));
-        }
-        if self.waypoint(goal).is_none() {
-            return Err(format!(
-                "목적지 waypoint가 지도에 없습니다: {:?}:{:?}",
-                goal.lane, goal.index
-            ));
-        }
-        if blocked.contains(&goal) {
-            return Err("목적지 waypoint가 장애물로 차단되었습니다.".to_string());
-        }
-
         let mut open = BinaryHeap::new();
         let mut g_score: HashMap<(NodeKey, u32), f64> = HashMap::new();
         let mut parent: HashMap<(NodeKey, u32), (NodeKey, u32)> = HashMap::new();
@@ -250,6 +281,236 @@ impl PathGraph {
                         tentative,
                         tentative + heuristic(self, neighbor.node, goal),
                         neighbor.node,
+                        next_changes,
+                    ));
+                }
+            }
+        }
+
+        Err("경로를 찾을 수 없습니다.".to_string())
+    }
+
+    fn primary_heading(&self, node: NodeKey) -> Option<f64> {
+        let current_wp = self.waypoint(node)?;
+        let current_pos = current_wp.position();
+        let neighbors = self.adjacency.get(&node)?;
+
+        let mut best_heading: Option<f64> = None;
+        let mut best_same_lane = false;
+        let mut best_dist = f64::INFINITY;
+
+        for neighbor in neighbors {
+            if let Some(target_wp) = self.waypoint(neighbor.node) {
+                let heading = heading_between(current_pos, target_wp.position());
+                let same_lane = neighbor.node.lane == node.lane;
+
+                let is_better = match best_heading {
+                    None => true,
+                    Some(_) => {
+                        if same_lane && !best_same_lane {
+                            true
+                        } else if same_lane == best_same_lane {
+                            neighbor.distance + f64::EPSILON < best_dist
+                        } else {
+                            false
+                        }
+                    }
+                };
+
+                if is_better {
+                    best_heading = Some(heading);
+                    best_same_lane = same_lane;
+                    best_dist = neighbor.distance;
+                }
+            }
+        }
+
+        best_heading
+    }
+
+    fn heading_candidates(&self, node: NodeKey, goal: NodeKey, bins: u16) -> Vec<u16> {
+        let Some(origin_wp) = self.waypoint(node) else {
+            return vec![0];
+        };
+        let origin_pos = origin_wp.position();
+        let mut result: Vec<u16> = Vec::new();
+
+        if let Some(primary) = self.primary_heading(node) {
+            let idx = heading_to_index(primary, bins);
+            result.push(idx);
+        }
+
+        if let Some(neighbors) = self.adjacency.get(&node) {
+            for neighbor in neighbors.iter().take(6) {
+                if let Some(target_wp) = self.waypoint(neighbor.node) {
+                    let heading = heading_between(origin_pos, target_wp.position());
+                    let idx = heading_to_index(heading, bins);
+                    if !result.iter().any(|&cand| cand == idx) {
+                        result.push(idx);
+                    }
+                }
+            }
+        }
+
+        if let Some(goal_wp) = self.waypoint(goal) {
+            let heading = heading_between(origin_pos, goal_wp.position());
+            let idx = heading_to_index(heading, bins);
+            if !result.iter().any(|&cand| cand == idx) {
+                result.push(idx);
+            }
+        }
+
+        if result.is_empty() {
+            result.push(0);
+        }
+        result
+    }
+
+    fn plan_path_hybrid(
+        &self,
+        start: NodeKey,
+        goal: NodeKey,
+        blocked: &HashSet<NodeKey>,
+        lane_change_penalty: f64,
+        max_lane_changes: u32,
+    ) -> Result<PlannedPath, String> {
+        const HEADING_BINS: u16 = 36;
+        const TURN_PENALTY_COEFF: f64 = 1.5;
+        const HEADING_HEURISTIC_WEIGHT: f64 = 0.75;
+        const MAX_BASE_HEADING_DELTA: f64 = PI / 2.0;
+        const MAX_LANE_CHANGE_DELTA: f64 = PI * 0.75;
+
+        let goal_heading_idx = {
+            let goal_heading = self
+                .primary_heading(goal)
+                .or_else(|| {
+                    self.waypoint(goal)
+                        .zip(self.waypoint(start))
+                        .map(|(goal_wp, start_wp)| {
+                            heading_between(goal_wp.position(), start_wp.position())
+                        })
+                })
+                .unwrap_or(0.0);
+            heading_to_index(goal_heading, HEADING_BINS)
+        };
+
+        let mut open = BinaryHeap::new();
+        let mut g_score: HashMap<(NodeKey, u16, u32), f64> = HashMap::new();
+        let mut parent: HashMap<(NodeKey, u16, u32), (NodeKey, u16, u32)> = HashMap::new();
+
+        let start_headings = self.heading_candidates(start, goal, HEADING_BINS);
+        for heading_idx in start_headings {
+            let state = (start, heading_idx, 0u32);
+            g_score.insert(state, 0.0);
+            let estimate = hybrid_heuristic(
+                self,
+                start,
+                heading_idx,
+                goal,
+                goal_heading_idx,
+                HEADING_BINS,
+                HEADING_HEURISTIC_WEIGHT,
+            );
+            open.push(HybridHeapNode::new(0.0, estimate, start, heading_idx, 0));
+        }
+
+        while let Some(node) = open.pop() {
+            if blocked.contains(&node.key) && node.key != start {
+                continue;
+            }
+            if node.key == goal {
+                let waypoints = reconstruct_path_hybrid(
+                    self,
+                    &parent,
+                    (node.key, node.heading_idx, node.lane_changes),
+                );
+                let lane_change_count = waypoints
+                    .windows(2)
+                    .filter(|pair| pair[0].lane != pair[1].lane)
+                    .count() as u32;
+                return Ok(PlannedPath {
+                    waypoints,
+                    lane_change_count,
+                });
+            }
+
+            let neighbors = match self.adjacency.get(&node.key) {
+                Some(list) => list,
+                None => continue,
+            };
+
+            let current_heading = index_to_heading(node.heading_idx, HEADING_BINS);
+
+            for neighbor in neighbors {
+                if blocked.contains(&neighbor.node) {
+                    continue;
+                }
+
+                let additional_change = if neighbor.node.lane != node.key.lane {
+                    1
+                } else {
+                    0
+                };
+                let next_changes = node.lane_changes + additional_change;
+                if next_changes > max_lane_changes {
+                    continue;
+                }
+
+                let Some(current_wp) = self.waypoint(node.key) else {
+                    continue;
+                };
+                let Some(target_wp) = self.waypoint(neighbor.node) else {
+                    continue;
+                };
+
+                let next_heading = heading_between(current_wp.position(), target_wp.position());
+                let heading_delta = heading_difference(next_heading, current_heading);
+
+                let max_delta = if neighbor.lane_change {
+                    MAX_LANE_CHANGE_DELTA
+                } else {
+                    MAX_BASE_HEADING_DELTA
+                };
+                if heading_delta.abs() > max_delta {
+                    continue;
+                }
+
+                let curvature_penalty = heading_delta.abs() * TURN_PENALTY_COEFF;
+                let lane_penalty = if neighbor.lane_change {
+                    lane_change_penalty
+                } else {
+                    0.0
+                };
+
+                let step_cost = neighbor.distance + lane_penalty + curvature_penalty;
+                let tentative = node.cost + step_cost;
+
+                let heading_idx = heading_to_index(next_heading, HEADING_BINS);
+                let neighbor_state = (neighbor.node, heading_idx, next_changes);
+                let entry = g_score.entry(neighbor_state).or_insert(f64::INFINITY);
+
+                if tentative + f64::EPSILON < *entry {
+                    *entry = tentative;
+                    parent.insert(
+                        neighbor_state,
+                        (node.key, node.heading_idx, node.lane_changes),
+                    );
+
+                    let estimate = tentative
+                        + hybrid_heuristic(
+                            self,
+                            neighbor.node,
+                            heading_idx,
+                            goal,
+                            goal_heading_idx,
+                            HEADING_BINS,
+                            HEADING_HEURISTIC_WEIGHT,
+                        );
+                    open.push(HybridHeapNode::new(
+                        tentative,
+                        estimate,
+                        neighbor.node,
+                        heading_idx,
                         next_changes,
                     ));
                 }
@@ -433,10 +694,89 @@ impl std::ops::Deref for ReverseHeapNode {
     }
 }
 
+#[derive(Debug)]
+struct HybridHeapNode {
+    cost: f64,
+    estimate: f64,
+    key: NodeKey,
+    heading_idx: u16,
+    lane_changes: u32,
+}
+
+impl HybridHeapNode {
+    fn new(
+        cost: f64,
+        estimate: f64,
+        key: NodeKey,
+        heading_idx: u16,
+        lane_changes: u32,
+    ) -> ReverseHybridHeapNode {
+        ReverseHybridHeapNode(HybridHeapNode {
+            cost,
+            estimate,
+            key,
+            heading_idx,
+            lane_changes,
+        })
+    }
+}
+
+struct ReverseHybridHeapNode(HybridHeapNode);
+
+impl PartialEq for ReverseHybridHeapNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.estimate.eq(&other.0.estimate)
+    }
+}
+
+impl Eq for ReverseHybridHeapNode {}
+
+impl PartialOrd for ReverseHybridHeapNode {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ReverseHybridHeapNode {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .0
+            .estimate
+            .partial_cmp(&self.0.estimate)
+            .unwrap_or(Ordering::Equal)
+    }
+}
+
+impl std::ops::Deref for ReverseHybridHeapNode {
+    type Target = HybridHeapNode;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 fn reconstruct_path(
     graph: &PathGraph,
     parent: &HashMap<(NodeKey, u32), (NodeKey, u32)>,
     mut state: (NodeKey, u32),
+) -> Vec<PathWaypoint> {
+    let mut path = Vec::new();
+    while let Some(wp) = graph.waypoint(state.0) {
+        path.push(wp.clone());
+        if let Some(&prev) = parent.get(&state) {
+            state = prev;
+        } else {
+            break;
+        }
+    }
+    path.reverse();
+    path
+}
+
+fn reconstruct_path_hybrid(
+    graph: &PathGraph,
+    parent: &HashMap<(NodeKey, u16, u32), (NodeKey, u16, u32)>,
+    mut state: (NodeKey, u16, u32),
 ) -> Vec<PathWaypoint> {
     let mut path = Vec::new();
     while let Some(wp) = graph.waypoint(state.0) {
@@ -463,12 +803,74 @@ fn heuristic(graph: &PathGraph, node: NodeKey, goal: NodeKey) -> f64 {
     distance(node_wp, goal_wp)
 }
 
+fn hybrid_heuristic(
+    graph: &PathGraph,
+    node: NodeKey,
+    heading_idx: u16,
+    goal: NodeKey,
+    goal_heading_idx: u16,
+    heading_bins: u16,
+    heading_weight: f64,
+) -> f64 {
+    let dist = heuristic(graph, node, goal);
+    let heading = index_to_heading(heading_idx, heading_bins);
+    let goal_heading = index_to_heading(goal_heading_idx, heading_bins);
+    let heading_delta = heading_difference(heading, goal_heading).abs();
+    dist + heading_delta * heading_weight
+}
+
 fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
 }
 
 fn cmp_f64(a: f64, b: f64) -> Ordering {
     a.partial_cmp(&b).unwrap_or(Ordering::Equal)
+}
+
+fn heading_between(a: [f64; 2], b: [f64; 2]) -> f64 {
+    (b[1] - a[1]).atan2(b[0] - a[0])
+}
+
+fn heading_difference(a: f64, b: f64) -> f64 {
+    normalize_angle(a - b)
+}
+
+fn heading_to_index(heading: f64, bins: u16) -> u16 {
+    if bins == 0 {
+        return 0;
+    }
+    let step = 2.0 * PI / bins as f64;
+    let normalized = normalize_angle_positive(heading);
+    let idx = (normalized / step).floor() as i64;
+    idx.rem_euclid(bins as i64) as u16
+}
+
+fn index_to_heading(idx: u16, bins: u16) -> f64 {
+    if bins == 0 {
+        return 0.0;
+    }
+    let step = 2.0 * PI / bins as f64;
+    idx as f64 * step
+}
+
+fn normalize_angle(mut angle: f64) -> f64 {
+    let two_pi = 2.0 * PI;
+    while angle <= -PI {
+        angle += two_pi;
+    }
+    while angle > PI {
+        angle -= two_pi;
+    }
+    angle
+}
+
+fn normalize_angle_positive(mut angle: f64) -> f64 {
+    let two_pi = 2.0 * PI;
+    angle = angle % two_pi;
+    if angle < 0.0 {
+        angle += two_pi;
+    }
+    angle
 }
 
 #[derive(Debug, Deserialize)]
@@ -526,6 +928,7 @@ pub fn publish_global_path(
     };
 
     let plan = graph.plan_path(
+        calib.global_planner,
         start_key,
         goal_key,
         blocked,
