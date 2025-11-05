@@ -13,8 +13,8 @@
 - `RawMap`, `RawWaypoint`: 지도 JSON 역직렬화용 구조체.
 
 ## 전역 경로 탐색
-- `PathGraph::nearest_waypoint(lane, position, horizon)`: 현재 위치와 가장 가까운 waypoint 후보를 찾습니다.
-- `PathGraph::plan_path(start, goal, blocked, lane_change_penalty, max_lane_changes)`: 차선 변경 비용과 차단 노드를 고려한 A* 탐색을 수행합니다.
+- `PathGraph::nearest_waypoint(lane, position, heading, horizon, heading_threshold)`: 위치와 헤딩을 바탕으로 전방 후보를 우선 선정합니다.
+- `PathGraph::plan_path(algorithm, start, goal, blocked, lane_change_penalty, max_lane_changes)`: 선택한 탐색 알고리즘(A*/하이브리드 A*)으로 경로를 생성합니다.
 - `publish_global_path(...)`: `PlannedPath`를 `DtoAdasGlobalPath`로 변환해 브로드캐스트하고, 1초 주기로 로그를 출력합니다.
 - `compute_blocked_nodes(...)`: 장애물 거리(threshold)만큼 경로 waypoint를 차단 리스트에 추가합니다.
 - `refresh_blocked_nodes(...)`: 만료된 차단 항목을 제거하고 캐시를 갱신합니다.

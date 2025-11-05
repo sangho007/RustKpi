@@ -43,6 +43,8 @@ pub struct AdasPathGlobalCalibration {
     pub max_lane_change_candidates: usize,
     /// 시작점 탐색 시 사용될 최대 이웃 waypoint 개수.
     pub nearest_search_horizon: usize,
+    /// 시작 waypoint 후보에서 헤딩과의 내적이 이 값 이상인 항목을 우선한다.
+    pub nearest_heading_cos_threshold: f64,
     /// 차선 변경 재시도 최소 간격.
     pub lane_change_retry_cooldown: Duration,
     /// 장애물 앞 waypoint를 차단할 때 적용할 여유 거리(m).
@@ -72,6 +74,7 @@ impl Default for AdasPathGlobalCalibration {
             max_same_lane_distance_m: 0.1,
             max_lane_change_candidates: 8,
             nearest_search_horizon: 12,
+            nearest_heading_cos_threshold: 0.0,
             lane_change_retry_cooldown: Duration::from_millis(500),
             obstacle_block_margin_m: 0.2,
             obstacle_block_timeout: Duration::from_millis(500),

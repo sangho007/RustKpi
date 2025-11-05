@@ -186,7 +186,9 @@ impl PathGraph {
         &self,
         lane: LocalizationLane,
         position: [f64; 2],
+        heading: Option<[f64; 2]>,
         horizon: usize,
+        heading_cos_threshold: f64,
     ) -> Option<NodeKey> {
         let candidates = match lane {
             LocalizationLane::Inner => &self.inner,
@@ -207,11 +209,42 @@ impl PathGraph {
 
         scored.sort_by(|a, b| cmp_f64(a.0, b.0));
         let limit = horizon.max(1);
-        scored
-            .into_iter()
-            .take(limit)
-            .next()
-            .map(|(_, idx)| NodeKey { lane, index: idx })
+        let heading_unit = heading.and_then(|vec| {
+            let norm = (vec[0] * vec[0] + vec[1] * vec[1]).sqrt();
+            if norm <= f64::EPSILON {
+                None
+            } else {
+                Some([vec[0] / norm, vec[1] / norm])
+            }
+        });
+        let threshold = heading_cos_threshold.clamp(-1.0, 1.0);
+        let mut fallback: Option<NodeKey> = None;
+
+        for (_, idx) in scored.into_iter().take(limit) {
+            let key = NodeKey { lane, index: idx };
+            if fallback.is_none() {
+                fallback = Some(key);
+            }
+
+            match heading_unit {
+                Some(heading_vec) => {
+                    let candidate = &candidates[idx];
+                    let dir = [candidate.x - position[0], candidate.y - position[1]];
+                    let norm = (dir[0] * dir[0] + dir[1] * dir[1]).sqrt();
+                    if norm <= f64::EPSILON {
+                        return Some(key);
+                    }
+                    let dir_unit = [dir[0] / norm, dir[1] / norm];
+                    let dot = dir_unit[0] * heading_vec[0] + dir_unit[1] * heading_vec[1];
+                    if dot >= threshold {
+                        return Some(key);
+                    }
+                }
+                None => return Some(key),
+            }
+        }
+
+        fallback
     }
 
     fn plan_path_astar(
@@ -915,8 +948,15 @@ pub fn publish_global_path(
 
     let position = state.position_map_xy;
     let start_lane = state.lane;
+    let heading = localization_heading(state);
     let start_key = graph
-        .nearest_waypoint(start_lane, position, calib.nearest_search_horizon)
+        .nearest_waypoint(
+            start_lane,
+            position,
+            heading,
+            calib.nearest_search_horizon,
+            calib.nearest_heading_cos_threshold,
+        )
         .ok_or_else(|| format!("lane={:?}에서 근접 waypoint를 찾지 못했습니다.", start_lane))?;
 
     let (lane_change_penalty, max_lane_changes) = match mode {
@@ -1048,16 +1088,28 @@ pub fn try_publish_local_path(
     }
 }
 
+fn localization_heading(state: &DtoLocalizationState) -> Option<[f64; 2]> {
+    state
+        .motion_heading_rad
+        .map(|ang| [ang.cos(), ang.sin()])
+        .or_else(|| {
+            let vec = [state.yaw_rad.cos(), state.yaw_rad.sin()];
+            if vec[0].is_finite() && vec[1].is_finite() {
+                Some(vec)
+            } else {
+                None
+            }
+        })
+}
+
 /// Localization 위치와 전역 경로에서 가장 가까운 waypoint 인덱스를 찾는다.
 pub fn find_nearest_waypoint_index(
     global_path: &DtoAdasGlobalPath,
     state: &DtoLocalizationState,
 ) -> usize {
     let position = state.position_map_xy;
-    let heading = state
-        .motion_heading_rad
-        .map(|ang| [ang.cos(), ang.sin()])
-        .or_else(|| initial_heading_from_global_path(global_path));
+    let heading =
+        localization_heading(state).or_else(|| initial_heading_from_global_path(global_path));
 
     let mut best_forward: Option<(usize, f64)> = None;
     let mut best_any: Option<(usize, f64)> = None;
