@@ -186,7 +186,7 @@ pub struct LocalizationScenarioSelection {
 }
 
 /// 도착 판정을 위한 거리 임계값(미터). `LOCALIZATION_ACTIVE_SCENARIO` 기준으로 조정한다.
-pub const LOCALIZATION_ARRIVAL_THRESHOLD_M: f64 = 0.10; // 10cm
+pub const LOCALIZATION_ARRIVAL_THRESHOLD_M: f64 = 0.15; // 15cm
 
 // === 테스트할 시나리오 선택 영역 ===
 // map/start/destination을 원하는 프리셋 값으로 바꿔서 실험한다.
