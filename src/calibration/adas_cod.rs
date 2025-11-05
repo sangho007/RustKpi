@@ -29,7 +29,7 @@ impl Default for AdasLateralCalibration {
     fn default() -> Self {
         Self {
             lane_to_servo_gain: -5.0,
-            curvature_to_servo_gain: -5.0,
+            curvature_to_servo_gain: -180.0,
             lateral_offset_gain: -3.0,
             servo_neutral_deg: 90,
             servo_min_deg: 0,

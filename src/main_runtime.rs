@@ -68,9 +68,11 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
     let mut loc_state_rx = localization_channels.state_tx.subscribe();
     let mut global_path_rx = channels.path.global_tx.subscribe();
     let mut local_path_rx = channels.path.local_tx.subscribe();
+    let mut smoothed_path_rx = channels.path.smoothed_tx.subscribe();
 
     let mut latest_global_path: Option<Arc<DtoAdasGlobalPath>> = None;
     let mut latest_local_path: Option<Arc<DtoAdasLocalPath>> = None;
+    let mut latest_smoothed_path: Option<Arc<DtoAdasSmoothedPath>> = None;
     let mut latest_localization_state: Option<DtoLocalizationState> = None;
     let mut last_path_preview = Instant::now()
         .checked_sub(PATH_PREVIEW_INTERVAL)
@@ -208,6 +210,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                         preview_tx.as_ref(),
                         latest_global_path.as_ref(),
                         latest_local_path.as_ref(),
+                        latest_smoothed_path.as_ref(),
                         latest_localization_state.as_ref(),
                         &mut last_path_preview,
                     );
@@ -232,6 +235,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                         preview_tx.as_ref(),
                         latest_global_path.as_ref(),
                         latest_local_path.as_ref(),
+                        latest_smoothed_path.as_ref(),
                         latest_localization_state.as_ref(),
                         &mut last_path_preview,
                     );
@@ -241,6 +245,31 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                 }
                 Err(RecvError::Closed) => {
                     runtime_println!("[MAIN] Local path channel closed, shutting down...");
+                    break 'main_loop;
+                }
+            },
+            // 스무딩 경로 업데이트를 처리한다.
+            result = smoothed_path_rx.recv() => match result {
+                Ok(path_arc) => {
+                    let mut newest = path_arc;
+                    while let Ok(newer) = smoothed_path_rx.try_recv() {
+                        newest = newer;
+                    }
+                    latest_smoothed_path = Some(newest);
+                    maybe_publish_path_preview(
+                        preview_tx.as_ref(),
+                        latest_global_path.as_ref(),
+                        latest_local_path.as_ref(),
+                        latest_smoothed_path.as_ref(),
+                        latest_localization_state.as_ref(),
+                        &mut last_path_preview,
+                    );
+                }
+                Err(RecvError::Lagged(n)) => {
+                    runtime_eprintln!("[MAIN] Smoothed path lagged by {}", n);
+                }
+                Err(RecvError::Closed) => {
+                    runtime_println!("[MAIN] Smoothed path channel closed, shutting down...");
                     break 'main_loop;
                 }
             },
@@ -309,6 +338,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                         preview_tx.as_ref(),
                         latest_global_path.as_ref(),
                         latest_local_path.as_ref(),
+                        latest_smoothed_path.as_ref(),
                         latest_localization_state.as_ref(),
                         &mut last_path_preview,
                     );
@@ -386,6 +416,7 @@ fn maybe_publish_path_preview(
     preview_tx: Option<&mpsc::Sender<PreviewMessage>>,
     global_path: Option<&Arc<DtoAdasGlobalPath>>,
     local_path: Option<&Arc<DtoAdasLocalPath>>,
+    smoothed_path: Option<&Arc<DtoAdasSmoothedPath>>,
     localization_state: Option<&DtoLocalizationState>,
     last_sent: &mut Instant,
 ) {
@@ -395,7 +426,8 @@ fn maybe_publish_path_preview(
     if last_sent.elapsed() < PATH_PREVIEW_INTERVAL {
         return;
     }
-    let frame = match build_path_preview_frame(global_path, local_path, localization_state) {
+    let frame =
+        match build_path_preview_frame(global_path, local_path, smoothed_path, localization_state) {
         Some(frame) => frame,
         None => return,
     };
@@ -409,6 +441,7 @@ fn maybe_publish_path_preview(
 fn build_path_preview_frame(
     global_path: Option<&Arc<DtoAdasGlobalPath>>,
     local_path: Option<&Arc<DtoAdasLocalPath>>,
+    smoothed_path: Option<&Arc<DtoAdasSmoothedPath>>,
     localization_state: Option<&DtoLocalizationState>,
 ) -> Option<FramePacket> {
     let mut min_x = f64::INFINITY;
@@ -432,6 +465,17 @@ fn build_path_preview_frame(
         for wp in &path.waypoints {
             let x = wp.position_xy[0] as f64;
             let y = wp.position_xy[1] as f64;
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+            has_points = true;
+        }
+    }
+    if let Some(path) = smoothed_path {
+        for sample in &path.samples_xy {
+            let x = sample[0] as f64;
+            let y = sample[1] as f64;
             min_x = min_x.min(x);
             max_x = max_x.max(x);
             min_y = min_y.min(y);
@@ -549,6 +593,25 @@ fn build_path_preview_frame(
         }
     }
 
+    if let Some(path) = smoothed_path {
+        let mut previous: Option<Point> = None;
+        for sample in &path.samples_xy {
+            let pt = to_point(sample[0] as f64, sample[1] as f64);
+            if let Some(prev) = previous {
+                let _ = imgproc::line(
+                    &mut canvas,
+                    prev,
+                    pt,
+                    Scalar::new(40.0, 200.0, 255.0, 0.0),
+                    2,
+                    imgproc::LINE_AA,
+                    0,
+                );
+            }
+            previous = Some(pt);
+        }
+    }
+
     if let Some(state) = localization_state {
         let pos = to_point(state.position_map_xy[0], state.position_map_xy[1]);
         let heading = state.yaw_rad;
@@ -601,8 +664,19 @@ fn build_path_preview_frame(
     );
     let _ = imgproc::put_text(
         &mut canvas,
-        "Pose",
+        "Smoothed Path",
         Point::new(label_position.x, label_position.y + 44),
+        imgproc::FONT_HERSHEY_SIMPLEX,
+        0.5,
+        Scalar::new(40.0, 200.0, 255.0, 0.0),
+        1,
+        imgproc::LINE_AA,
+        false,
+    );
+    let _ = imgproc::put_text(
+        &mut canvas,
+        "Pose",
+        Point::new(label_position.x, label_position.y + 66),
         imgproc::FONT_HERSHEY_SIMPLEX,
         0.5,
         Scalar::new(0.0, 0.0, 255.0, 0.0),
