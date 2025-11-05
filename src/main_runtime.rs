@@ -67,6 +67,16 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
         select! {
             biased;
 
+            // 사용자 Ctrl-C 입력을 감지한다. (우선순위를 높여 즉시 종료한다.)
+            result = &mut ctrl_c => {
+                if let Err(err) = result {
+                    eprintln!("[MAIN] Failed to receive Ctrl-C signal: {}", err);
+                } else {
+                    println!("[MAIN] Ctrl-C received, shutting down...");
+                }
+                break 'main_loop;
+            },
+
             // 최신 원시 카메라 프레임을 프리뷰로 전달한다.
             result = camraw_rx.recv() => match result {
                 Ok(camraw) => {
@@ -326,16 +336,6 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                     eprintln!("[MAIN] IMU channel closed.");
                     break 'main_loop;
                 }
-            },
-
-            // 사용자 Ctrl-C 입력을 감지한다.
-            result = &mut ctrl_c => {
-                if let Err(err) = result {
-                    eprintln!("[MAIN] Failed to receive Ctrl-C signal: {}", err);
-                } else {
-                    println!("[MAIN] Ctrl-C received, shutting down...");
-                }
-                break 'main_loop;
             },
         }
 
