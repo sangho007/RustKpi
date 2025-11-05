@@ -1,12 +1,15 @@
 //! 메인 런타임: RTE 채널에서 데이터를 수집해 프리뷰 GUI로 전달한다.
 //! 또한 IMU/초음파 로그를 출력하고 종료 시그널을 관리한다.
 
+use crate::calibration::LOCALIZATION_ACTIVE_SCENARIO;
 use crate::rte::rte_dto::*;
 use crate::rte::rte_main::RteChannels;
 use crate::util::preview_runtime::{self, FramePacket, FramePayload, PreviewEvent, PreviewMessage};
 use opencv::core::{CV_8UC3, Mat, Point, Scalar};
 use opencv::imgproc;
 use opencv::prelude::{MatExprTraitConst, MatTraitConst, MatTraitConstManual};
+use serde::Deserialize;
+use std::fs;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use tokio::{select, sync::broadcast::error::RecvError};
@@ -34,6 +37,24 @@ macro_rules! runtime_eprintln {
 const PATH_PREVIEW_INTERVAL: Duration = Duration::from_millis(200);
 const PATH_CANVAS_SIZE: i32 = 640;
 
+struct MapWaypoints {
+    inner: Vec<[f64; 2]>,
+    outer: Vec<[f64; 2]>,
+}
+
+#[derive(Deserialize)]
+struct RawWaypoint {
+    position: [f32; 2],
+}
+
+#[derive(Deserialize)]
+struct RawMap {
+    #[serde(default)]
+    inner_waypoint: Vec<RawWaypoint>,
+    #[serde(default)]
+    outer_waypoint: Vec<RawWaypoint>,
+}
+
 /// RTE 채널을 사용하며 프리뷰 GUI와 데이터 스트림을 조율하는 메인 런타임 루프를 수행한다.
 pub async fn run(channels: RteChannels) -> opencv::Result<()> {
     // 카메라·초음파 채널을 복제해 비동기 작업에서 공유한다.
@@ -41,6 +62,8 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
     let ultrasonic_channels = channels.ultrasonic.clone();
     let imu_channels = channels.imu.clone();
     let localization_channels = channels.localization.clone();
+
+    let map_waypoints = load_map_waypoints(LOCALIZATION_ACTIVE_SCENARIO.map);
 
     // 사용자에게 실행 상태를 안내한다.
     runtime_println!("== 시스템 실행 중... (GUI 창에서 'q'를 누르면 종료) ==");
@@ -212,6 +235,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                         latest_local_path.as_ref(),
                         latest_smoothed_path.as_ref(),
                         latest_localization_state.as_ref(),
+                        map_waypoints.as_ref(),
                         &mut last_path_preview,
                     );
                 }
@@ -237,6 +261,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                         latest_local_path.as_ref(),
                         latest_smoothed_path.as_ref(),
                         latest_localization_state.as_ref(),
+                        map_waypoints.as_ref(),
                         &mut last_path_preview,
                     );
                 }
@@ -262,6 +287,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                         latest_local_path.as_ref(),
                         latest_smoothed_path.as_ref(),
                         latest_localization_state.as_ref(),
+                        map_waypoints.as_ref(),
                         &mut last_path_preview,
                     );
                 }
@@ -340,6 +366,7 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                         latest_local_path.as_ref(),
                         latest_smoothed_path.as_ref(),
                         latest_localization_state.as_ref(),
+                        map_waypoints.as_ref(),
                         &mut last_path_preview,
                     );
                 }
@@ -418,6 +445,7 @@ fn maybe_publish_path_preview(
     local_path: Option<&Arc<DtoAdasLocalPath>>,
     smoothed_path: Option<&Arc<DtoAdasSmoothedPath>>,
     localization_state: Option<&DtoLocalizationState>,
+    map_waypoints: Option<&MapWaypoints>,
     last_sent: &mut Instant,
 ) {
     if preview_tx.is_none() {
@@ -431,6 +459,7 @@ fn maybe_publish_path_preview(
         local_path,
         smoothed_path,
         localization_state,
+        map_waypoints,
     ) {
         Some(frame) => frame,
         None => return,
@@ -447,12 +476,34 @@ fn build_path_preview_frame(
     local_path: Option<&Arc<DtoAdasLocalPath>>,
     smoothed_path: Option<&Arc<DtoAdasSmoothedPath>>,
     localization_state: Option<&DtoLocalizationState>,
+    map_waypoints: Option<&MapWaypoints>,
 ) -> Option<FramePacket> {
     let mut min_x = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
     let mut min_y = f64::INFINITY;
     let mut max_y = f64::NEG_INFINITY;
     let mut has_points = false;
+
+    if let Some(map) = map_waypoints {
+        for pos in &map.inner {
+            let x = pos[0];
+            let y = pos[1];
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+            has_points = true;
+        }
+        for pos in &map.outer {
+            let x = pos[0];
+            let y = pos[1];
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+            has_points = true;
+        }
+    }
 
     if let Some(path) = global_path {
         for wp in &path.waypoints {
@@ -550,6 +601,60 @@ fn build_path_preview_frame(
         Err(_) => return None,
     };
 
+    if let Some(map) = map_waypoints {
+        let mut previous: Option<Point> = None;
+        for pos in &map.inner {
+            let pt = to_point(pos[0], pos[1]);
+            if let Some(prev) = previous {
+                let _ = imgproc::line(
+                    &mut canvas,
+                    prev,
+                    pt,
+                    Scalar::new(70.0, 70.0, 70.0, 0.0),
+                    1,
+                    imgproc::LINE_AA,
+                    0,
+                );
+            }
+            let _ = imgproc::circle(
+                &mut canvas,
+                pt,
+                2,
+                Scalar::new(110.0, 110.0, 110.0, 0.0),
+                -1,
+                imgproc::LINE_AA,
+                0,
+            );
+            previous = Some(pt);
+        }
+
+        let mut previous_outer: Option<Point> = None;
+        for pos in &map.outer {
+            let pt = to_point(pos[0], pos[1]);
+            if let Some(prev) = previous_outer {
+                let _ = imgproc::line(
+                    &mut canvas,
+                    prev,
+                    pt,
+                    Scalar::new(110.0, 110.0, 110.0, 0.0),
+                    1,
+                    imgproc::LINE_AA,
+                    0,
+                );
+            }
+            let _ = imgproc::circle(
+                &mut canvas,
+                pt,
+                2,
+                Scalar::new(170.0, 170.0, 170.0, 0.0),
+                -1,
+                imgproc::LINE_AA,
+                0,
+            );
+            previous_outer = Some(pt);
+        }
+    }
+
     if let Some(path) = global_path {
         let mut previous: Option<Point> = None;
         for wp in &path.waypoints {
@@ -646,8 +751,30 @@ fn build_path_preview_frame(
     let label_position = Point::new(18, 28);
     let _ = imgproc::put_text(
         &mut canvas,
-        "Global Path",
+        "Inner Lane",
         Point::new(label_position.x, label_position.y),
+        imgproc::FONT_HERSHEY_SIMPLEX,
+        0.5,
+        Scalar::new(70.0, 70.0, 70.0, 0.0),
+        1,
+        imgproc::LINE_AA,
+        false,
+    );
+    let _ = imgproc::put_text(
+        &mut canvas,
+        "Outer Lane",
+        Point::new(label_position.x, label_position.y + 22),
+        imgproc::FONT_HERSHEY_SIMPLEX,
+        0.5,
+        Scalar::new(110.0, 110.0, 110.0, 0.0),
+        1,
+        imgproc::LINE_AA,
+        false,
+    );
+    let _ = imgproc::put_text(
+        &mut canvas,
+        "Global Path",
+        Point::new(label_position.x, label_position.y + 44),
         imgproc::FONT_HERSHEY_SIMPLEX,
         0.5,
         Scalar::new(128.0, 128.0, 255.0, 0.0),
@@ -658,7 +785,7 @@ fn build_path_preview_frame(
     let _ = imgproc::put_text(
         &mut canvas,
         "Local Path",
-        Point::new(label_position.x, label_position.y + 22),
+        Point::new(label_position.x, label_position.y + 66),
         imgproc::FONT_HERSHEY_SIMPLEX,
         0.5,
         Scalar::new(80.0, 255.0, 80.0, 0.0),
@@ -669,7 +796,7 @@ fn build_path_preview_frame(
     let _ = imgproc::put_text(
         &mut canvas,
         "Smoothed Path",
-        Point::new(label_position.x, label_position.y + 44),
+        Point::new(label_position.x, label_position.y + 88),
         imgproc::FONT_HERSHEY_SIMPLEX,
         0.5,
         Scalar::new(40.0, 200.0, 255.0, 0.0),
@@ -680,7 +807,7 @@ fn build_path_preview_frame(
     let _ = imgproc::put_text(
         &mut canvas,
         "Pose",
-        Point::new(label_position.x, label_position.y + 66),
+        Point::new(label_position.x, label_position.y + 110),
         imgproc::FONT_HERSHEY_SIMPLEX,
         0.5,
         Scalar::new(0.0, 0.0, 255.0, 0.0),
@@ -697,6 +824,44 @@ fn build_path_preview_frame(
         format: ColorFormat::Bgr,
         payload: FramePayload::Owned(data),
     })
+}
+
+fn load_map_waypoints(map_id: crate::calibration::LocalizationMapId) -> Option<MapWaypoints> {
+    let path = map_id.json_asset();
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) => {
+            runtime_eprintln!("[MAIN] Failed to read map file {}: {}", path, err);
+            return None;
+        }
+    };
+    let raw: RawMap = match serde_json::from_str(&text) {
+        Ok(raw) => raw,
+        Err(err) => {
+            runtime_eprintln!("[MAIN] Failed to parse map file {}: {}", path, err);
+            return None;
+        }
+    };
+
+    let RawMap {
+        inner_waypoint,
+        outer_waypoint,
+    } = raw;
+
+    let inner = inner_waypoint
+        .into_iter()
+        .map(|wp| [wp.position[0] as f64, wp.position[1] as f64])
+        .collect::<Vec<_>>();
+    let outer = outer_waypoint
+        .into_iter()
+        .map(|wp| [wp.position[0] as f64, wp.position[1] as f64])
+        .collect::<Vec<_>>();
+
+    if inner.is_empty() && outer.is_empty() {
+        None
+    } else {
+        Some(MapWaypoints { inner, outer })
+    }
 }
 
 /// OpenCV Mat의 채널 수를 기준으로 프리뷰에 사용할 색상 포맷을 결정한다.
