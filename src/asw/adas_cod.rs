@@ -6,8 +6,9 @@ use crate::asw::lib::adas_path_lib::curvature_from_smoothed_path;
 use crate::asw::lib::vs_trafficlight_lib::TrafficLightColor;
 use crate::calibration::{AdasLateralCalibration, AdasLongitudinalCalibration};
 use crate::rte::rte_dto::{
-    AdasLaneChangeState, DtoAdasSmoothedPath, DtoDcMotorCtrl, DtoLocalizationState, DtoServoCtrl,
-    DtoTrafficLight, DtoTrafficLightDirective, DtoUltraSonicObstacle, DtoUltraSonicRaw,
+    AdasLaneChangeState, DtoAdasSmoothedPath, DtoDcMotorCtrl, DtoLocalizationArrival,
+    DtoLocalizationState, DtoServoCtrl, DtoTrafficLight, DtoTrafficLightDirective,
+    DtoUltraSonicObstacle, DtoUltraSonicRaw,
 };
 use crate::rte::rte_main::RteChannels;
 use std::sync::Arc;
@@ -193,6 +194,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let mut traffic_rx = channels.camera.traffic_light_tx.subscribe();
     let mut traffic_directive_rx = channels.camera.traffic_light_directive_tx.subscribe();
     let mut path_rx = channels.path.smoothed_tx.subscribe();
+    let mut arrival_rx = channels.localization.arrival_tx.subscribe();
     let mut imu_ready_rx = channels.imu.parsed_tx.subscribe();
     let dc_tx = channels.control.dc_motor_tx.clone();
 
@@ -204,6 +206,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let mut latest_signal: Option<DtoTrafficLight> = None;
     let mut latest_directive: Option<Arc<DtoTrafficLightDirective>> = None;
     let mut latest_path: Option<Arc<DtoAdasSmoothedPath>> = None;
+    let mut latest_arrival: Option<Arc<DtoLocalizationArrival>> = None;
     let mut last_cmd: Option<(u32, u32)> = None;
     let mut alive_cnt: u32 = 0;
     let mut last_log = Instant::now();
@@ -329,6 +332,19 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             }
             Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
         }
+        match arrival_rx.try_recv() {
+            Ok(dto) => {
+                let mut newest = dto;
+                while let Ok(newer) = arrival_rx.try_recv() {
+                    newest = newer;
+                }
+                latest_arrival = Some(newest);
+            }
+            Err(TryRecvError::Lagged(n)) => {
+                eprintln!("[{}] ADAS longitudinal arrival lagged by {}", id, n);
+            }
+            Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
+        }
 
         tick.tick().await;
 
@@ -360,11 +376,16 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
         let traffic_color = latest_signal
             .as_ref()
             .map(|signal| signal.traffic_light_color.clone());
+        let arrival_state = latest_arrival
+            .as_deref()
+            .map(|arrival| arrival.arrived)
+            .unwrap_or(false);
 
         // 장애물·신호·거리 조건을 종합해 정지 여부를 결정한다.
-        let obstacle_stop = stop_requested_obstacle;
+        let obstacle_stop = stop_requested_obstacle || distance_state.0;
         let traffic_stop =
             matches!(traffic_color.as_ref(), Some(TrafficLightColor::Red)) || stop_requested_signal;
+        let arrival_stop = arrival_state;
 
         let caution_signal = matches!(
             traffic_color.as_ref(),
@@ -400,7 +421,9 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             gain *= 0.8;
         }
 
-        let base_stop_reason = if obstacle_stop {
+        let base_stop_reason = if arrival_stop {
+            Some("arrival")
+        } else if obstacle_stop {
             Some("obstacle")
         } else if traffic_stop {
             Some("traffic")
@@ -441,7 +464,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             }
         }
 
-        if stop_engaged || gating_stop {
+        if stop_engaged || gating_stop || effective_stop_reason.is_some() {
             gain = 0.0;
         } else if need_caution {
             gain *= 0.6;
@@ -481,15 +504,21 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             let distance_str = distance_cm
                 .map(|d| format!("{:.1}", d))
                 .unwrap_or_else(|| "--".to_string());
-            let stop_display = if stop_engaged || gating_stop {
+            let stop_display = if stop_engaged || gating_stop || effective_stop_reason.is_some() {
                 effective_stop_reason.unwrap_or("--")
             } else {
                 "--"
             };
+            let arrival_display = latest_arrival
+                .as_deref()
+                .map(|arrival| format!("{:.2}", arrival.distance_m))
+                .unwrap_or_else(|| "--".to_string());
             println!(
-                "[{}] Longitudinal: dist={}cm curvature={:.4} gain={:.2} stop={} lane_change={} accel_req={} path_ready={} signal={:?} -> dir={} speed={}",
+                "[{}] Longitudinal: dist={}cm arrival={} arrival_dist={}m curvature={:.4} gain={:.2} stop={} lane_change={} accel_req={} path_ready={} signal={:?} -> dir={} speed={}",
                 id,
                 distance_str,
+                arrival_state,
+                arrival_display,
                 curvature_abs,
                 gain,
                 stop_display,
