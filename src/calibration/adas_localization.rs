@@ -194,7 +194,7 @@ pub const LOCALIZATION_ARRIVAL_THRESHOLD_M: f64 = 0.10; // 10cm
 pub const LOCALIZATION_ACTIVE_SCENARIO: LocalizationScenarioSelection =
     LocalizationScenarioSelection {
         map: LocalizationMapId::Crossroad,
-        start: CROSSROAD_STARTS[0],
+        start: CROSSROAD_STARTS[1],
         destination: CROSSROAD_DESTINATIONS[1],
     };
 
