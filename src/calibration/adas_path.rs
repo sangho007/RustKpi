@@ -50,7 +50,7 @@ impl Default for AdasPathGlobalCalibration {
             replanning_period: Duration::from_secs(2),
             vehicle_width_m: 0.15,
             vehicle_length_m: 0.20,
-            max_lane_change_offset_m: 0.3,
+            max_lane_change_offset_m: 1.0,
             forward_tolerance_m: 0.02,
             lane_change_penalty_m: 1.0,
             forced_lane_change_penalty_m: -0.5,
