@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 pub const MOTION_HEADING_MIN_STEP_M: f64 = 0.01; // 1cm 이상 움직였을 때만 헤딩 계산.
 pub const AXIS_SELECTION_MAX_ERROR_RAD: f64 = PI / 4.0; // 45도 이내면 동일 축으로 간주.
+pub const IMU_ROLL_YAW_OFFSET_RAD: f64 = PI / 2.0; // 롤 값이 차량 yaw보다 90도 뒤쳐져 있는 경우.
 
 /// ADAS Localization에서 반복적으로 사용하는 런타임 상태 묶음.
 pub struct LocalizationRuntime {
@@ -230,9 +231,10 @@ pub fn process_imu_sample(
             // 2순위: 직전 yaw를 유지한다.
             yaw_candidate = Some((*prev_yaw, *prev_src));
         } else if let Some(orientation) = pose.orientation_yaw_roll_pitch.as_ref() {
-            // 3순위: 센서가 yaw 축을 직접 제공한다고 가정한다.
-            let raw = orientation[0];
-            yaw_candidate = Some((wrap_angle(raw), LocalizationYawSource::ImuYaw));
+            // 3순위: IMU 롤 값이 차량 yaw에 대응한다고 가정하고 90도 오프셋을 적용한다.
+            let raw = orientation[1];
+            let yaw = wrap_angle(raw + IMU_ROLL_YAW_OFFSET_RAD);
+            yaw_candidate = Some((yaw, LocalizationYawSource::ImuRoll));
         }
     }
 
