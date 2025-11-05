@@ -21,7 +21,7 @@
 
 ## 로컬 경로 및 스무딩
 - `try_publish_local_path(...)`: 전역 경로와 로컬라이제이션 상태에서 차량 주변 일정 구간(`AdasPathLocalCalibration::waypoint_window`)을 잘라 `DtoAdasLocalPath`로 게시합니다.
-- `smooth_local_path(waypoints, state, sample_count)`: 프레네 좌표로 변환 후 5차 다항식 곡선을 피팅해 균일 간격 샘플을 생성합니다. 실패 시 원본 waypoint를 반환합니다.
+- `smooth_local_path(waypoints, state, sample_count)`: 프레네 좌표로 변환 후 5차 다항식 곡선을 피팅해 균일 간격 샘플을 생성합니다. 필요 시 선행 waypoint는 `AdasPathLocalCalibration::smoothing_skip_head`만큼 제외합니다. 실패 시 원본 waypoint를 반환합니다.
 - `curvature_from_smoothed_path(...)`: 스무딩 샘플에서 곡률을 계산해 횡방향 제어에 활용합니다.
 - `determine_lane_change_state(...)`: 로컬 경로에 inner/outer waypoint가 혼재하는지 확인해 `AdasLaneChangeState`를 판정합니다.
 
@@ -36,5 +36,5 @@
 
 ## 튜닝 지점
 - `calibration::adas_path::AdasPathGlobalCalibration`: 차선 변경 비용, 후보 개수, 장애물 차단 거리, 재탐색 주기.
-- `calibration::adas_path::AdasPathLocalCalibration`: 로컬 절편 window 크기와 스무딩 샘플 수.
+- `calibration::adas_path::AdasPathLocalCalibration`: 로컬 절편 window 크기, 선행 제외 개수, 스무딩 샘플 수.
 - 지도 JSON(`LocalizationMapId::json_asset`)에서 `can_change_lane` 플래그를 설정하면 차선 변경 가능 구간을 제어할 수 있습니다.

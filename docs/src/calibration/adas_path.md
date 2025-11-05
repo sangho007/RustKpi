@@ -33,12 +33,13 @@
 ## 로컬 경로 파라미터
 | 필드 | 설명 | 기본값 |
 | --- | --- | --- |
-| `waypoint_window` | 전역 경로에서 잘라낼 waypoint 수 | 7 |
+| `waypoint_window` | 전역 경로에서 잘라낼 waypoint 수 | 10 |
 | `smoothing_sample_count` | 스무딩 후 생성할 샘플 개수 | 20 |
+| `smoothing_skip_head` | 스무딩 대상에서 제외할 선행 waypoint 수 | 3 |
 
 ## 튜닝 가이드
 - **차선 변경 민감도**: `lane_change_penalty_m`를 키우면 동일 차선을 유지하고, 작게 하면 차선 변경을 더 쉽게 허용합니다. 강제 차선 변경 시에는 `forced_lane_change_penalty_m`가 별도로 적용되므로 둘의 균형을 맞추세요.
 - **장애물 회피**: 초음파 장애물이 감지되면 전역 경로 러너블이 `obstacle_block_margin_m`만큼 앞쪽 waypoint를 차단합니다. 거리 센서 정확도에 따라 여유 폭과 `obstacle_block_timeout`을 조정하세요.
-- **로컬 경로 품질**: 스무딩 샘플 수를 늘리면 곡선이 부드럽지만 연산량이 늘고, 너무 작으면 곡선이 꺾일 수 있습니다. 차량 회전 반경에 맞춰 `waypoint_window`와 함께 테스트하세요.
+- **로컬 경로 품질**: 스무딩 샘플 수를 늘리면 곡선이 부드럽지만 연산량이 늘고, 너무 작으면 곡선이 꺾일 수 있습니다. 차량 회전 반경에 맞춰 `waypoint_window`와 `smoothing_skip_head`를 함께 조정하세요.
 
 튜닝 변경 시 `cargo fmt` 후 `cargo check` 혹은 주행 테스트와 함께 `Path View`(SDL 프리뷰 창의 `M` 키)에서 전역/로컬 경로와 차량 위치가 의도대로 변하는지 확인하는 것을 권장합니다.

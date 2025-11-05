@@ -1,5 +1,5 @@
 //! ADAS 단기 경로 생성 러너블.
-//! 전역 경로 결과를 구독해 차량 주변 구간(기본 7개 waypoint)을 잘라서 RTE에 배포한다.
+//! 전역 경로 결과를 구독해 차량 주변 구간(기본 10개 waypoint)을 잘라서 RTE에 배포한다.
 
 use crate::asw::lib::adas_path_lib::{now_timestamp_ns, smooth_local_path, try_publish_local_path};
 use crate::calibration::{
@@ -178,18 +178,27 @@ fn try_publish_smoothed_path(
 
     let lane_state = determine_lane_change_state(local_path);
 
-    let samples =
-        match smooth_local_path(&local_path.waypoints, state, calib.smoothing_sample_count) {
-            Ok(samples) => samples,
-            Err(err) => {
-                eprintln!("[{}] 스무딩 실패: {} (원본 경로로 대체)", id, err);
-                local_path
-                    .waypoints
-                    .iter()
-                    .map(|wp| wp.position_xy)
-                    .collect::<Vec<_>>()
-            }
-        };
+    let skip = calib
+        .smoothing_skip_head
+        .min(local_path.waypoints.len());
+    let smoothing_input = &local_path.waypoints[skip..];
+    let smoothing_source = if smoothing_input.len() >= 6 {
+        smoothing_input
+    } else {
+        &local_path.waypoints
+    };
+
+    let samples = match smooth_local_path(smoothing_source, state, calib.smoothing_sample_count) {
+        Ok(samples) => samples,
+        Err(err) => {
+            eprintln!("[{}] 스무딩 실패: {} (원본 경로로 대체)", id, err);
+            local_path
+                .waypoints
+                .iter()
+                .map(|wp| wp.position_xy)
+                .collect::<Vec<_>>()
+        }
+    };
 
     let sample_len = samples.len();
     let dto = Arc::new(DtoAdasSmoothedPath::new(

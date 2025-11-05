@@ -76,13 +76,16 @@ pub struct AdasPathLocalCalibration {
     pub waypoint_window: usize,
     /// 스무딩된 경로로 생성할 샘플 수.
     pub smoothing_sample_count: usize,
+    /// 스무딩 대상에서 제외할 선행 waypoint 수.
+    pub smoothing_skip_head: usize,
 }
 
 impl Default for AdasPathLocalCalibration {
     fn default() -> Self {
         Self {
-            waypoint_window: 7,
+            waypoint_window: 10,
             smoothing_sample_count: 20,
+            smoothing_skip_head: 3,
         }
     }
 }
