@@ -21,7 +21,7 @@ use tokio::time;
 /// - PID 제어기를 통해 서보 목표각을 계산하고, `max_servo_delta_deg` 레이트 리밋을 적용한다.
 /// - 결과를 `control.servo_tx` 채널로 퍼블리시한다.
 pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
-    let calib = AdasLateralCalibration::default();
+    let calib = AdasLateralCalibration::from_env();
     let mut path_rx = channels.path.smoothed_tx.subscribe();
     let mut localization_rx = channels.localization.state_tx.subscribe();
     let servo_tx = channels.control.servo_tx.clone();

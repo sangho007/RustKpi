@@ -2,6 +2,7 @@
 //! - `AdasLateralCalibration`: 스무딩 샘플 횡오차 PID 조향 제어 설정.
 //! - `AdasLongitudinalCalibration`: 신호/초음파 기반 속도 제어 설정.
 
+use std::env;
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug)]
@@ -31,6 +32,12 @@ pub struct AdasLateralCalibration {
 
 impl Default for AdasLateralCalibration {
     fn default() -> Self {
+        Self::baseline()
+    }
+}
+
+impl AdasLateralCalibration {
+    fn baseline() -> Self {
         Self {
             pid_kp: 150.0,
             pid_ki: 0.0,
@@ -42,6 +49,37 @@ impl Default for AdasLateralCalibration {
             servo_max_deg: 180,
             servo_channel_index: 0,
             max_servo_delta_deg: 10,
+        }
+    }
+
+    pub fn from_env() -> Self {
+        let mut calib = Self::baseline();
+        if let Some(value) = read_env_f64("ADAS_PID_KP") {
+            calib.pid_kp = value;
+        }
+        if let Some(value) = read_env_f64("ADAS_PID_KI") {
+            calib.pid_ki = value;
+        }
+        if let Some(value) = read_env_f64("ADAS_PID_KD") {
+            calib.pid_kd = value;
+        }
+        calib
+    }
+}
+
+fn read_env_f64(key: &str) -> Option<f64> {
+    match env::var(key) {
+        Ok(raw) => match raw.trim().parse::<f64>() {
+            Ok(value) => Some(value),
+            Err(err) => {
+                eprintln!("[Calib] {} parse 실패: {} (입력='{}')", key, err, raw);
+                None
+            }
+        },
+        Err(env::VarError::NotPresent) => None,
+        Err(err) => {
+            eprintln!("[Calib] {} 읽기 실패: {}", key, err);
+            None
         }
     }
 }
