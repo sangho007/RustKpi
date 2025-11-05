@@ -6,7 +6,7 @@ use crate::asw::lib::adas_path_lib::{
     NodeKey, PathGraph, PathPlanningMode, PlannedPath, publish_global_path,
 };
 use crate::calibration::{AdasPathGlobalCalibration, LOCALIZATION_ACTIVE_SCENARIO};
-use crate::rte::rte_dto::{DtoLocalizationState, DtoUltraSonicObstacle};
+use crate::rte::rte_dto::{AdasLaneChangeState, DtoLocalizationState, DtoUltraSonicObstacle};
 use crate::rte::rte_main::RteChannels;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -52,6 +52,7 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
 
     let mut localization_rx = channels.localization.state_tx.subscribe();
     let mut obstacle_rx = channels.ultrasonic.obstacle_tx.subscribe();
+    let mut smoothed_rx = channels.path.smoothed_tx.subscribe();
     let path_tx = channels.path.global_tx.clone();
 
     let mut latest_state: Option<DtoLocalizationState> = None;
@@ -60,6 +61,7 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
     let mut blocked_cache: HashSet<NodeKey> = HashSet::new();
     let mut lane_change_requested = false;
     let mut lane_change_cooldown_until: Option<Instant> = None;
+    let mut lane_change_in_progress = false;
 
     let mut tick = time::interval(calib.replanning_period);
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -107,6 +109,9 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                         }
 
                         if obstacle.lane_change_requested {
+                            if lane_change_in_progress {
+                                continue;
+                            }
                             if let (Some(plan), Some(state)) =
                                 (latest_plan.as_ref(), latest_state.as_ref())
                             {
@@ -166,7 +171,30 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                     }
                 }
             }
+            msg = smoothed_rx.recv() => {
+                match msg {
+                    Ok(smoothed_arc) => {
+                        let lane_state = smoothed_arc.lane_change_state;
+                        let changing = matches!(
+                            lane_state,
+                            AdasLaneChangeState::InnerToOuter | AdasLaneChangeState::OuterToInner
+                        );
+                        if changing {
+                            lane_change_in_progress = true;
+                        } else if lane_change_in_progress {
+                            lane_change_in_progress = false;
+                        }
+                    }
+                    Err(RecvError::Lagged(skipped)) => {
+                        eprintln!("[{}] 스무딩 경로 업데이트 {}개 누락", id, skipped);
+                    }
+                    Err(RecvError::Closed) => {}
+                }
+            }
             _ = tick.tick() => {
+                if lane_change_in_progress {
+                    continue;
+                }
                 if let Some(state) = latest_state.as_ref() {
                     let now = Instant::now();
                     refresh_blocked_nodes(&mut blocked_nodes, &mut blocked_cache, now);
