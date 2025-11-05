@@ -195,7 +195,7 @@ pub const LOCALIZATION_ACTIVE_SCENARIO: LocalizationScenarioSelection =
     LocalizationScenarioSelection {
         map: LocalizationMapId::OneLane,
         start: ONE_LANE_STARTS[0],
-        destination: ONE_LANE_DESTINATIONS[1],
+        destination: ONE_LANE_DESTINATIONS[0],
     };
 
 /// ADAS Localization에서 선택 가능한 지도 프리셋.
