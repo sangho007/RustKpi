@@ -1,5 +1,5 @@
 //! ADAS 제어 로직에서 사용하는 파라미터 정의.
-//! - `AdasLateralCalibration`: 차선 각도 기반 조향 제어 설정.
+//! - `AdasLateralCalibration`: 스무딩 샘플 횡오차 PID 조향 제어 설정.
 //! - `AdasLongitudinalCalibration`: 신호/초음파 기반 속도 제어 설정.
 
 use std::time::Duration;

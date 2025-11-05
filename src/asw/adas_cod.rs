@@ -6,7 +6,7 @@ use crate::asw::lib::adas_path_lib::curvature_from_smoothed_path;
 use crate::asw::lib::vs_trafficlight_lib::TrafficLightColor;
 use crate::calibration::{AdasLateralCalibration, AdasLongitudinalCalibration};
 use crate::rte::rte_dto::{
-    AdasLaneChangeState, DtoAdasLocalPath, DtoAdasSmoothedPath, DtoDcMotorCtrl, DtoServoCtrl,
+    AdasLaneChangeState, DtoAdasSmoothedPath, DtoDcMotorCtrl, DtoLocalizationState, DtoServoCtrl,
     DtoTrafficLight, DtoTrafficLightDirective, DtoUltraSonicObstacle, DtoUltraSonicRaw,
 };
 use crate::rte::rte_main::RteChannels;
@@ -16,13 +16,13 @@ use tokio::sync::broadcast::error::TryRecvError;
 use tokio::time;
 
 /// ADAS Lateral 제어 러너블.
-/// - 로컬 경로를 레퍼런스로, 스무딩 경로를 추종 대상으로 사용해 횡오차를 계산한다.
+/// - 차량 현재 yaw로 정의한 직선 참조 축을 기준으로 스무딩 경로의 횡오차를 계산한다.
 /// - PID 제어기를 통해 서보 목표각을 계산하고, `max_servo_delta_deg` 레이트 리밋을 적용한다.
 /// - 결과를 `control.servo_tx` 채널로 퍼블리시한다.
 pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     let calib = AdasLateralCalibration::default();
-    let mut local_rx = channels.path.local_tx.subscribe();
     let mut path_rx = channels.path.smoothed_tx.subscribe();
+    let mut localization_rx = channels.localization.state_tx.subscribe();
     let servo_tx = channels.control.servo_tx.clone();
 
     // 제어 루프 주기(기본 50ms)
@@ -31,8 +31,8 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     let dt_sec = control_period.as_secs_f64();
 
     // 최신 신호 캐시
-    let mut latest_local: Option<Arc<DtoAdasLocalPath>> = None;
     let mut latest_path: Option<Arc<DtoAdasSmoothedPath>> = None;
+    let mut latest_state: Option<Arc<DtoLocalizationState>> = None;
     let mut last_cmd_deg: u32 = calib.servo_neutral_deg;
     let mut last_log: Instant = Instant::now();
     let mut integral_error: f64 = 0.0;
@@ -40,16 +40,16 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
 
     loop {
         // 새 메시지가 도착했으면 최신으로 드레인
-        match local_rx.try_recv() {
+        match localization_rx.try_recv() {
             Ok(dto) => {
                 let mut newest = dto;
-                while let Ok(newer) = local_rx.try_recv() {
+                while let Ok(newer) = localization_rx.try_recv() {
                     newest = newer;
                 }
-                latest_local = Some(newest);
+                latest_state = Some(newest);
             }
             Err(TryRecvError::Lagged(n)) => {
-                eprintln!("[{}] ADAS lateral local_path lagged by {}", id, n);
+                eprintln!("[{}] ADAS lateral localization lagged by {}", id, n);
             }
             Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {
                 // Closed는 다음 루프에서 publish 없이 진행; Empty는 무시
@@ -78,11 +78,10 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
         let mut pid_output = 0.0;
         let mut current_error = None;
 
-        if let (Some(local_path), Some(smoothed_path)) =
-            (latest_local.as_deref(), latest_path.as_deref())
+        if let (Some(state), Some(smoothed_path)) =
+            (latest_state.as_deref(), latest_path.as_deref())
         {
-            current_error =
-                compute_lateral_error(local_path, smoothed_path, calib.pid_sample_index);
+            current_error = compute_lateral_error(state, smoothed_path, calib.pid_sample_index);
         }
 
         if let Some(state) = lane_state {
@@ -151,9 +150,13 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             let state_display = lane_state
                 .map(|state| format!("{:?}", state))
                 .unwrap_or_else(|| "--".to_string());
+            let yaw_display = latest_state
+                .as_deref()
+                .map(|s| format!("{:.2}", s.yaw_rad))
+                .unwrap_or_else(|| "--".to_string());
             println!(
-                "[{}] Lateral PID: error={} integ={:.3} state={} -> servo={}deg",
-                id, error_display, integral_error, state_display, last_cmd_deg
+                "[{}] Lateral PID: error={} integ={:.3} yaw={} state={} -> servo={}deg",
+                id, error_display, integral_error, yaw_display, state_display, last_cmd_deg
             );
             last_log = Instant::now();
         }
@@ -503,48 +506,28 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
 }
 
 fn compute_lateral_error(
-    local_path: &DtoAdasLocalPath,
+    state: &DtoLocalizationState,
     smoothed_path: &DtoAdasSmoothedPath,
     sample_index: usize,
 ) -> Option<f64> {
-    if local_path.waypoints.is_empty() || smoothed_path.samples_xy.is_empty() {
+    if smoothed_path.samples_xy.is_empty() {
         return None;
     }
 
     let idx_sample = sample_index.min(smoothed_path.samples_xy.len().saturating_sub(1));
-    let idx_ref = sample_index.min(local_path.waypoints.len().saturating_sub(1));
-
     let sample = smoothed_path.samples_xy.get(idx_sample)?;
-    let reference = local_path.waypoints.get(idx_ref)?;
 
-    let reference_pos = [
-        reference.position_xy[0] as f64,
-        reference.position_xy[1] as f64,
-    ];
-
-    // 레퍼런스 경로의 접선 벡터를 계산해 법선(횡방향) 축을 얻는다.
-    let tangent_vec = if idx_ref + 1 < local_path.waypoints.len() {
-        let next = &local_path.waypoints[idx_ref + 1];
-        [
-            next.position_xy[0] as f64 - reference_pos[0],
-            next.position_xy[1] as f64 - reference_pos[1],
-        ]
-    } else if idx_ref > 0 {
-        let prev = &local_path.waypoints[idx_ref - 1];
-        [
-            reference_pos[0] - prev.position_xy[0] as f64,
-            reference_pos[1] - prev.position_xy[1] as f64,
-        ]
+    let reference_pos = state.position_map_xy;
+    let heading = state.motion_heading_rad.unwrap_or(state.yaw_rad);
+    let mut tangent = [heading.cos(), heading.sin()];
+    let norm = (tangent[0] * tangent[0] + tangent[1] * tangent[1]).sqrt();
+    if norm < 1e-6 {
+        tangent = [1.0, 0.0];
     } else {
-        [1.0, 0.0]
-    };
+        tangent[0] /= norm;
+        tangent[1] /= norm;
+    }
 
-    let norm = (tangent_vec[0] * tangent_vec[0] + tangent_vec[1] * tangent_vec[1]).sqrt();
-    let tangent = if norm < 1e-6 {
-        [1.0, 0.0]
-    } else {
-        [tangent_vec[0] / norm, tangent_vec[1] / norm]
-    };
     let normal = [-tangent[1], tangent[0]];
 
     let actual = [sample[0] as f64, sample[1] as f64];
