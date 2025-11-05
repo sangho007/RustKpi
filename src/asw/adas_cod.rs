@@ -547,7 +547,11 @@ fn compute_lateral_error(
     let sample = smoothed_path.samples_xy.get(idx_sample)?;
 
     let reference_pos = state.position_map_xy;
-    let heading = state.motion_heading_rad.unwrap_or(state.yaw_rad);
+    let heading = if state.yaw_rad.is_finite() {
+        state.yaw_rad
+    } else {
+        state.motion_heading_rad.unwrap_or(0.0)
+    };
     let mut tangent = [heading.cos(), heading.sin()];
     let norm = (tangent[0] * tangent[0] + tangent[1] * tangent[1]).sqrt();
     if norm < 1e-6 {
