@@ -178,24 +178,41 @@ fn try_publish_smoothed_path(
 
     let lane_state = determine_lane_change_state(local_path);
 
-    let skip = calib.smoothing_skip_head.min(local_path.waypoints.len());
+    let min_samples = calib.smoothing_min_samples.max(2);
+    let max_skip = local_path.waypoints.len().saturating_sub(min_samples);
+    let skip = calib.smoothing_skip_head.min(max_skip);
     let smoothing_input = &local_path.waypoints[skip..];
-    let smoothing_source = if smoothing_input.len() >= 6 {
-        smoothing_input
-    } else {
-        &local_path.waypoints
-    };
 
-    let samples = match smooth_local_path(smoothing_source, state, calib.smoothing_sample_count) {
-        Ok(samples) => samples,
-        Err(err) => {
-            eprintln!("[{}] 스무딩 실패: {} (원본 경로로 대체)", id, err);
-            local_path
-                .waypoints
-                .iter()
-                .map(|wp| wp.position_xy)
-                .collect::<Vec<_>>()
+    let samples = if smoothing_input.len() >= min_samples {
+        match smooth_local_path(smoothing_input, state, calib.smoothing_sample_count) {
+            Ok(samples) => samples,
+            Err(err) => {
+                eprintln!("[{}] 스무딩 실패: {} (원본 경로로 대체)", id, err);
+                smoothing_input
+                    .iter()
+                    .map(|wp| wp.position_xy)
+                    .collect::<Vec<_>>()
+            }
         }
+    } else if local_path.waypoints.len() >= min_samples {
+        match smooth_local_path(&local_path.waypoints, state, calib.smoothing_sample_count) {
+            Ok(samples) => samples,
+            Err(err) => {
+                eprintln!("[{}] 스무딩 실패: {} (원본 경로로 대체)", id, err);
+                local_path
+                    .waypoints
+                    .iter()
+                    .map(|wp| wp.position_xy)
+                    .collect::<Vec<_>>()
+            }
+        }
+    } else {
+        // Waypoint가 너무 적을 때는 스무딩을 시도하지 않고 원본을 그대로 사용한다.
+        local_path
+            .waypoints
+            .iter()
+            .map(|wp| wp.position_xy)
+            .collect::<Vec<_>>()
     };
 
     let sample_len = samples.len();

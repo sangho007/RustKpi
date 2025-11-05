@@ -52,7 +52,7 @@ impl Default for AdasPathGlobalCalibration {
             vehicle_length_m: 0.20,
             max_lane_change_offset_m: 1.0,
             forward_tolerance_m: 0.02,
-            lane_change_penalty_m: 1.0,
+            lane_change_penalty_m: 3.0,
             forced_lane_change_penalty_m: -0.5,
             max_lane_changes: 5,
             forced_max_lane_changes: 2,
@@ -78,6 +78,8 @@ pub struct AdasPathLocalCalibration {
     pub smoothing_sample_count: usize,
     /// 스무딩 대상에서 제외할 선행 waypoint 수.
     pub smoothing_skip_head: usize,
+    /// 스무딩을 수행하기 위한 최소 waypoint 수.
+    pub smoothing_min_samples: usize,
 }
 
 impl Default for AdasPathLocalCalibration {
@@ -86,6 +88,7 @@ impl Default for AdasPathLocalCalibration {
             waypoint_window: 10,
             smoothing_sample_count: 20,
             smoothing_skip_head: 3,
+            smoothing_min_samples: 6,
         }
     }
 }
