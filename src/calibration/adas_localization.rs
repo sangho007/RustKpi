@@ -194,8 +194,8 @@ pub const LOCALIZATION_ARRIVAL_THRESHOLD_M: f64 = 0.10; // 10cm
 pub const LOCALIZATION_ACTIVE_SCENARIO: LocalizationScenarioSelection =
     LocalizationScenarioSelection {
         map: LocalizationMapId::Crossroad,
-        start: CROSSROAD_STARTS[0],
-        destination: CROSSROAD_DESTINATIONS[1],
+        start: CROSSROAD_STARTS[1],
+        destination: CROSSROAD_DESTINATIONS[3],
     };
 
 /// ADAS Localization에서 선택 가능한 지도 프리셋.
