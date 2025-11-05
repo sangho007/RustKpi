@@ -101,6 +101,12 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                         refresh_blocked_nodes(&mut blocked_nodes, &mut blocked_cache, now);
 
                         lane_change_requested = obstacle.lane_change_requested;
+                        if obstacle.lane_change_requested || obstacle.stop_requested {
+                            println!(
+                                "[{}] 장애물 재계획 트리거: lane_change_req={} stop_req={} dist={:.2}cm",
+                                id, obstacle.lane_change_requested, obstacle.stop_requested, obstacle.distance_cm
+                            );
+                        }
                         if !obstacle.lane_change_requested && !obstacle.stop_requested {
                             blocked_nodes.clear();
                             blocked_cache.clear();
@@ -110,6 +116,10 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
 
                         if obstacle.lane_change_requested {
                             if lane_change_in_progress {
+                                println!(
+                                    "[{}] Lane change 진행 중 → 장애물 기반 재계획 건너뜀",
+                                    id
+                                );
                                 continue;
                             }
                             if let (Some(plan), Some(state)) =
@@ -157,6 +167,16 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                                             lane_change_cooldown_until =
                                                 Some(now + calib.lane_change_retry_cooldown);
                                         }
+                                    }
+                                } else {
+                                    if let Some(deadline) = lane_change_cooldown_until {
+                                        println!(
+                                            "[{}] 장애물 재계획 대기 중: 쿨다운 {:.0}ms 남음",
+                                            id,
+                                            deadline
+                                                .saturating_duration_since(now)
+                                                .as_millis()
+                                        );
                                     }
                                 }
                             }
