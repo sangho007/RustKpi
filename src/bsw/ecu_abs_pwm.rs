@@ -70,6 +70,11 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
         let _ = pwm.set_channel_off(*channel, angle_to_pwm(*default_angle));
     }
 
+    // DC 모터 채널을 명시적으로 정지시켜 초기 부팅 시 오동작을 방지한다.
+    motor_stop(&mut pwm, Motor::M1);
+    motor_stop(&mut pwm, Motor::M2);
+    println!("[BSW] DC 모터 초기화: M1/M2를 정지 상태로 설정했습니다.");
+
     let mut servo_rx = control.servo_tx.subscribe();
     let mut dc_rx = control.dc_motor_tx.subscribe();
     // 최근 명령 상태를 유지해 중복 로그를 줄이고, 초기 각도를 보존한다.
