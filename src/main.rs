@@ -26,26 +26,51 @@ async fn wait_for_ev_ready(
 
     println!("[INIT] Waiting for EV READY (IMU stream)...");
     let mut imu_rx = channels.imu.parsed_tx.subscribe();
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
 
     loop {
-        match imu_rx.recv().await {
-            Ok(imu) => {
-                println!(
-                    "[INIT] EV READY confirmed (seq={}, alive_cnt={}).",
-                    imu.header.seq, imu.alive_cnt
-                );
-                println!("[INIT] Stabilizing... (3s)");
-                sleep(Duration::from_secs(3)).await;
-                return Ok(());
+        tokio::select! {
+            biased;
+
+            ctrl = &mut ctrl_c => {
+                match ctrl {
+                    Ok(()) => {
+                        println!("[INIT] Ctrl-C received before EV READY; aborting startup...");
+                        return Err(opencv::Error::new(
+                            opencv::core::StsError,
+                            "Cancelled while waiting for EV READY".to_string(),
+                        ));
+                    }
+                    Err(err) => {
+                        eprintln!("[INIT] Failed to listen for Ctrl-C: {}", err);
+                        return Err(opencv::Error::new(
+                            opencv::core::StsError,
+                            format!("Failed to listen for Ctrl-C: {}", err),
+                        ));
+                    }
+                }
             }
-            Err(RecvError::Lagged(_)) => {
-                continue;
-            }
-            Err(RecvError::Closed) => {
-                return Err(opencv::Error::new(
-                    opencv::core::StsError,
-                    "IMU channel closed before EV READY".to_string(),
-                ));
+
+            recv = imu_rx.recv() => match recv {
+                Ok(imu) => {
+                    println!(
+                        "[INIT] EV READY confirmed (seq={}, alive_cnt={}).",
+                        imu.header.seq, imu.alive_cnt
+                    );
+                    println!("[INIT] Stabilizing... (3s)");
+                    sleep(Duration::from_secs(3)).await;
+                    return Ok(());
+                }
+                Err(RecvError::Lagged(_)) => {
+                    continue;
+                }
+                Err(RecvError::Closed) => {
+                    return Err(opencv::Error::new(
+                        opencv::core::StsError,
+                        "IMU channel closed before EV READY".to_string(),
+                    ));
+                }
             }
         }
     }
