@@ -253,9 +253,19 @@ pub fn process_imu_sample(
     );
 
     if runtime.last_log.elapsed() >= Duration::from_millis(500) {
+        let imu_ypr_deg = pose
+            .orientation_yaw_roll_pitch
+            .as_ref()
+            .map(|ori| {
+                (
+                    rad_to_deg(ori[0]),
+                    rad_to_deg(ori[1]),
+                    rad_to_deg(ori[2]),
+                )
+            });
         // 주기별로 핵심 값을 출력해 센서 데이터 흐름을 확인한다.
         println!(
-            "[{}] pose=({:.3}, {:.3}) yaw={:.2} deg (src={:?}) motion={}",
+            "[{}] pose=({:.3}, {:.3}) yaw={:.2} deg (src={:?}) motion={} imu_ypr={}",
             id,
             map_position[0],
             map_position[1],
@@ -263,6 +273,9 @@ pub fn process_imu_sample(
             yaw_source,
             motion_heading
                 .map(|h| format!("{:.2} deg", rad_to_deg(h)))
+                .unwrap_or_else(|| "--".to_string()),
+            imu_ypr_deg
+                .map(|(y, r, p)| format!("{:.2}/{:.2}/{:.2} deg", y, r, p))
                 .unwrap_or_else(|| "--".to_string())
         );
         runtime.last_log = Instant::now();
