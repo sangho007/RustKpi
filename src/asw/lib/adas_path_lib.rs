@@ -712,9 +712,10 @@ pub fn smooth_local_path(
     }
 
     let origin = waypoints.first().ok_or("로컬 경로가 비어 있습니다.")?;
-    let mut heading = initial_heading_from_points(waypoints)
+    // 차량 자세는 IMU yaw(roll 보정) 값을 최우선으로 사용하고, 부족할 때만 궤적 기반 추정으로 보완한다.
+    let mut heading = Some([state.yaw_rad.cos(), state.yaw_rad.sin()])
         .or_else(|| state.motion_heading_rad.map(|ang| [ang.cos(), ang.sin()]))
-        .or_else(|| Some([state.yaw_rad.cos(), state.yaw_rad.sin()]))
+        .or_else(|| initial_heading_from_points(waypoints))
         .ok_or("헤딩 각도를 결정할 수 없습니다.")?;
 
     let norm = (heading[0] * heading[0] + heading[1] * heading[1]).sqrt();
