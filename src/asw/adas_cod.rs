@@ -11,7 +11,7 @@ use crate::rte::rte_dto::{
 };
 use crate::rte::rte_main::RteChannels;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::TryRecvError;
 use tokio::time;
 
@@ -182,6 +182,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let mut traffic_rx = channels.camera.traffic_light_tx.subscribe();
     let mut traffic_directive_rx = channels.camera.traffic_light_directive_tx.subscribe();
     let mut path_rx = channels.path.smoothed_tx.subscribe();
+    let mut imu_ready_rx = channels.imu.parsed_tx.subscribe();
     let dc_tx = channels.control.dc_motor_tx.clone();
 
     let mut tick = time::interval(calib.control_period);
@@ -198,8 +199,52 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let mut stop_request_since: Option<Instant> = None;
     let mut stop_release_since: Option<Instant> = None;
     let mut stop_engaged = false;
+    let mut ev_ready_released = false;
+    let mut ev_ready_deadline: Option<Instant> = None;
+    const EV_READY_HOLD_SECS: u64 = 3;
 
     loop {
+        if !ev_ready_released {
+            let mut saw_ready_signal = false;
+            loop {
+                match imu_ready_rx.try_recv() {
+                    Ok(_) => {
+                        saw_ready_signal = true;
+                        continue;
+                    }
+                    Err(TryRecvError::Lagged(_)) => {
+                        saw_ready_signal = true;
+                        break;
+                    }
+                    Err(TryRecvError::Empty) => {
+                        break;
+                    }
+                    Err(TryRecvError::Closed) => {
+                        ev_ready_released = true;
+                        println!(
+                            "[{}] Longitudinal: IMU channel closed, EV READY 게이트를 해제합니다.",
+                            id
+                        );
+                        break;
+                    }
+                }
+            }
+            if saw_ready_signal && ev_ready_deadline.is_none() {
+                ev_ready_deadline =
+                    Some(Instant::now() + Duration::from_secs(EV_READY_HOLD_SECS));
+                println!(
+                    "[{}] Longitudinal: EV READY 감지, {}초 대기 후 주행을 시작합니다.",
+                    id, EV_READY_HOLD_SECS
+                );
+            }
+            if let Some(deadline) = ev_ready_deadline {
+                if Instant::now() >= deadline {
+                    ev_ready_released = true;
+                    println!("[{}] Longitudinal: EV READY 게이트 해제, 주행 제어를 시작합니다.", id);
+                }
+            }
+        }
+
         // 초음파 거리 측정값 확인
         match distance_rx.try_recv() {
             Ok(dto) => {
@@ -322,7 +367,14 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             .as_deref()
             .map(|path| !path.samples_xy.is_empty())
             .unwrap_or(false);
-        let gating_stop = !path_ready;
+        let gating_reason = if !ev_ready_released {
+            Some("ev_ready")
+        } else if !path_ready {
+            Some("no_path")
+        } else {
+            None
+        };
+        let gating_stop = gating_reason.is_some();
 
         let curvature_abs = latest_path
             .as_deref()
@@ -342,10 +394,11 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
         } else {
             None
         };
-        let mut effective_stop_reason = base_stop_reason;
-        if gating_stop {
-            effective_stop_reason = Some("no_path");
-        }
+        let effective_stop_reason = if let Some(reason) = gating_reason {
+            Some(reason)
+        } else {
+            base_stop_reason
+        };
 
         let now = Instant::now();
         if let Some(_reason) = effective_stop_reason {
