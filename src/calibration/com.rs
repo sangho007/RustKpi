@@ -12,7 +12,7 @@ pub struct ComCalibration {
 impl Default for ComCalibration {
     fn default() -> Self {
         Self {
-            tcp_host: "127.0.0.1",
+            tcp_host: "0.0.0.0",
             tcp_port: 4820,
             max_payload_size: 512 * 1024, // 최대 512KiB까지 허용해 비정상 패킷을 차단
         }
