@@ -195,7 +195,7 @@ pub const LOCALIZATION_ACTIVE_SCENARIO: LocalizationScenarioSelection =
     LocalizationScenarioSelection {
         map: LocalizationMapId::Crossroad,
         start: CROSSROAD_STARTS[0],
-        destination: CROSSROAD_DESTINATIONS[0],
+        destination: CROSSROAD_DESTINATIONS[1],
     };
 
 /// ADAS Localization에서 선택 가능한 지도 프리셋.
