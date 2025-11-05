@@ -230,9 +230,9 @@ pub fn process_imu_sample(
             // 2순위: 직전 yaw를 유지한다.
             yaw_candidate = Some((*prev_yaw, *prev_src));
         } else if let Some(orientation) = pose.orientation_yaw_roll_pitch.as_ref() {
-            // 3순위: 실측 결과를 근거로 pitch가 차량 yaw와 대응한다고 가정한다.
-            let raw = orientation[2];
-            yaw_candidate = Some((wrap_angle(raw), LocalizationYawSource::ImuPitch));
+            // 3순위: 센서가 yaw 축을 직접 제공한다고 가정한다.
+            let raw = orientation[0];
+            yaw_candidate = Some((wrap_angle(raw), LocalizationYawSource::ImuYaw));
         }
     }
 
