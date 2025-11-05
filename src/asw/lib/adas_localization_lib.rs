@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 pub const MOTION_HEADING_MIN_STEP_M: f64 = 0.01; // 1cm 이상 움직였을 때만 헤딩 계산.
 pub const IMU_ROLL_YAW_OFFSET_RAD: f64 = PI / 2.0; // 롤 값이 차량 yaw보다 90도 뒤쳐져 있는 경우.
 
-/// ADAS Localization에서 반복적으로 사용하는 런타임 상태 묶음.
+/// ADAS Localization에서 반복적으로 사용하는 런타임 상태 묶음. gg
 pub struct LocalizationRuntime {
     /// IMU 절대 좌표의 기준점(초기 위치). None이면 아직 설정되지 않음.
     pub base_imu_position: Option<[f64; 3]>,
