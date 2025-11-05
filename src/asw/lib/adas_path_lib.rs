@@ -879,10 +879,25 @@ fn fit_quintic_polynomial(s_values: &[f64], d_values: &[f64]) -> Result<[f64; 6]
         return Err("최소 6개의 샘플이 필요합니다.");
     }
 
+    let scale = s_values
+        .iter()
+        .fold(0.0f64, |acc, &s| acc.max(s.abs()));
+    if scale <= 1e-12 {
+        return Err("s 값 범위가 너무 작습니다.");
+    }
+
     let mut ata = [[0.0f64; 6]; 6];
     let mut atd = [0.0f64; 6];
     for (&s, &d) in s_values.iter().zip(d_values.iter()) {
-        let powers = [1.0, s, s * s, s * s * s, s * s * s * s, s * s * s * s * s];
+        let t = s / scale;
+        let powers = [
+            1.0,
+            t,
+            t * t,
+            t * t * t,
+            t * t * t * t,
+            t * t * t * t * t,
+        ];
         for i in 0..6 {
             for j in 0..6 {
                 ata[i][j] += powers[i] * powers[j];
@@ -891,7 +906,16 @@ fn fit_quintic_polynomial(s_values: &[f64], d_values: &[f64]) -> Result<[f64; 6]
         }
     }
 
-    gaussian_solve6(ata, atd).ok_or("선형 시스템을 풀 수 없습니다.")
+    let coeffs_t = gaussian_solve6(ata, atd).ok_or("선형 시스템을 풀 수 없습니다.")?;
+
+    let mut coeffs = [0.0f64; 6];
+    let mut scale_power = 1.0f64;
+    for (idx, coef_t) in coeffs_t.iter().enumerate() {
+        coeffs[idx] = coef_t / scale_power;
+        scale_power *= scale;
+    }
+
+    Ok(coeffs)
 }
 
 fn gaussian_solve6(mut a: [[f64; 6]; 6], mut b: [f64; 6]) -> Option<[f64; 6]> {
