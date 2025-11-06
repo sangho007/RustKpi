@@ -116,8 +116,10 @@ impl Default for AdasLongitudinalCalibration {
     fn default() -> Self {
         Self {
             control_period: Duration::from_millis(50),
-            cruise_speed_percent: 40,
-            crawl_speed_percent: 35,
+            cruise_speed_percent: 0,
+            crawl_speed_percent: 0,
+            //cruise_speed_percent: 40,
+            //crawl_speed_percent: 35,
             slowdown_distance_cm: 60.0,
             stop_distance_cm: 35.0,
             log_interval: Duration::from_secs(1),
