@@ -6,9 +6,9 @@ use crate::asw::lib::adas_path_lib::curvature_from_smoothed_path;
 use crate::asw::lib::vs_trafficlight_lib::TrafficLightColor;
 use crate::calibration::{AdasLateralCalibration, AdasLongitudinalCalibration};
 use crate::rte::rte_dto::{
-    AdasLaneChangeState, DtoAdasSmoothedPath, DtoDcMotorCtrl, DtoLocalizationArrival,
-    DtoLocalizationState, DtoServoCtrl, DtoTrafficLight, DtoTrafficLightDirective,
-    DtoUltraSonicObstacle, DtoUltraSonicRaw,
+    AdasLaneChangeState, DtoAdasSmoothedPath, DtoCamLaneAngle, DtoDcMotorCtrl,
+    DtoLocalizationArrival, DtoLocalizationState, DtoServoCtrl, DtoTrafficLight,
+    DtoTrafficLightDirective, DtoUltraSonicObstacle, DtoUltraSonicRaw,
 };
 use crate::rte::rte_main::RteChannels;
 use std::sync::Arc;
@@ -24,6 +24,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     let calib = AdasLateralCalibration::from_env();
     let mut path_rx = channels.path.smoothed_tx.subscribe();
     let mut localization_rx = channels.localization.state_tx.subscribe();
+    let mut lane_angle_rx = channels.camera.lane_angle_tx.subscribe();
     let servo_tx = channels.control.servo_tx.clone();
 
     // 제어 루프 주기(기본 50ms)
@@ -34,6 +35,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     // 최신 신호 캐시
     let mut latest_path: Option<Arc<DtoAdasSmoothedPath>> = None;
     let mut latest_state: Option<Arc<DtoLocalizationState>> = None;
+    let mut _latest_lane_angle: Option<Arc<DtoCamLaneAngle>> = None;
     let mut last_cmd_deg: u32 = calib.servo_neutral_deg;
     let mut last_log: Instant = Instant::now();
     let mut integral_error: f64 = 0.0;
@@ -67,6 +69,20 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             }
             Err(TryRecvError::Lagged(n)) => {
                 eprintln!("[{}] ADAS lateral smoothed_path lagged by {}", id, n);
+            }
+            Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
+        }
+
+        match lane_angle_rx.try_recv() {
+            Ok(dto) => {
+                let mut newest = dto;
+                while let Ok(newer) = lane_angle_rx.try_recv() {
+                    newest = newer;
+                }
+                _latest_lane_angle = Some(newest);
+            }
+            Err(TryRecvError::Lagged(n)) => {
+                eprintln!("[{}] ADAS lateral lane_angle lagged by {}", id, n);
             }
             Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
         }
@@ -117,7 +133,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
         }
 
         //let base_cmd = calib.servo_neutral_deg as f64 - pid_output; -> good !!!!!
-        let base_cmd = calib.servo_neutral_deg as f64 - 10.0 * current_error.unwrap_or(0.0);
+        let base_cmd = calib.servo_neutral_deg as f64 - 10.0 * current_error.unwrap_or(0.0) + 0.05 * _latest_lane_angle.as_ref().unwrap().lateral_offset;
 
         let target_deg = base_cmd
             .round()
