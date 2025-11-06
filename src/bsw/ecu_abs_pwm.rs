@@ -8,7 +8,7 @@ use crate::rte::rte_main::ControlChannels;
 use linux_embedded_hal::I2cdev;
 use std::time::Instant;
 
-use pwm_pca9685::{Address, Pca9685};
+use pwm_pca9685::{Address, Channel, Pca9685};
 use tokio::{select, signal, sync::broadcast::error::RecvError};
 
 /// PCA9685 기반 액추에이터 제어 태스크를 실행한다.
@@ -67,7 +67,12 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
         .iter()
         .zip(pwm_calibration.servo_default_angles.iter())
     {
-        let _ = pwm.set_channel_off(*channel, angle_to_pwm(*default_angle));
+        let pwm_value = match *channel {
+            Channel::C0 => angle_to_pwm_steer(*default_angle),
+            Channel::C2 => angle_to_pwm_ultrasonic(*default_angle),
+            _ => angle_to_pwm_steer(*default_angle),
+        };
+        let _ = pwm.set_channel_off(*channel, pwm_value);
     }
 
     // DC 모터 채널을 명시적으로 정지시켜 초기 부팅 시 오동작을 방지한다.
@@ -104,10 +109,21 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
                 match servo_result {
                     Ok(servo_dto) => {
                         if let Some(&target_channel) = pwm_calibration.servo_channels.get(servo_dto.channel as usize) {
-                            let pwm_val = angle_to_pwm(servo_dto.angle);
-                            // 서보에 전달되는 듀티비를 직접 설정한다.
-                            if let Err(e) = pwm.set_channel_off(target_channel, pwm_val) {
-                                eprintln!("[BSW] 서보 채널 {:?} OFF 값 설정 실패: {:?}", target_channel, e);
+                            let pwm_val_steer = angle_to_pwm_steer(servo_dto.angle);
+                            let pwm_val_ultrasonic = angle_to_pwm_ultrasonic(servo_dto.angle);
+
+                            // 서보에 전달되는 듀티비를 채널 별 변환 함수로 적용한다.
+                            let result = match target_channel {
+                                Channel::C0 => pwm.set_channel_off(target_channel, pwm_val_steer),
+                                Channel::C2 => pwm.set_channel_off(target_channel, pwm_val_ultrasonic),
+                                _ => pwm.set_channel_off(target_channel, pwm_val_steer),
+                            };
+
+                            if let Err(e) = result {
+                                eprintln!(
+                                    "[BSW] 서보 채널 {:?} OFF 값 설정 실패: {:?}",
+                                    target_channel, e
+                                );
                             }
 
                             let idx = servo_dto.channel as usize;

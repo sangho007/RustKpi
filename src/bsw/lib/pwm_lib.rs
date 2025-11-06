@@ -45,7 +45,7 @@ pub fn servo_channels() -> [Channel; 2] {
 /// 원하는 각도(0-180도)를 PCA9685의 PWM off-cycle 값으로 변환한다.
 /// - 서보 모터의 캘리브레이션 범위(`servo_min`, `servo_max`)를 선형 보간한다.
 /// - 입력 값은 0~180도 범위로 강제(clamp)해 안전한 동작을 보장한다.
-pub fn angle_to_pwm(angle: u32) -> u16 {
+pub fn angle_to_pwm_steer(angle: u32) -> u16 {
     // 안전을 위해 각도를 0-180도 범위로 제한
     let clamped_angle = angle.clamp(0, 180);
     let converted_angle = 180 - clamped_angle;
@@ -53,6 +53,15 @@ pub fn angle_to_pwm(angle: u32) -> u16 {
     // SERVO_MIN과 SERVO_MAX 사이를 선형 보간하여 PWM 값을 계산
     let pwm_value = calib.servo_min as f64
         + (converted_angle as f64 / 180.0) * (calib.servo_max - calib.servo_min) as f64;
+    pwm_value.round() as u16
+}
+pub fn angle_to_pwm_ultrasonic(angle: u32) -> u16 {
+    // 안전을 위해 각도를 0-180도 범위로 제한
+    let clamped_angle = angle.clamp(0, 180);
+    let calib = calibration();
+    // SERVO_MIN과 SERVO_MAX 사이를 선형 보간하여 PWM 값을 계산
+    let pwm_value = calib.servo_min as f64
+        + (clamped_angle as f64 / 180.0) * (calib.servo_max - calib.servo_min) as f64;
     pwm_value.round() as u16
 }
 
