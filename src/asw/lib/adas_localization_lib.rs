@@ -187,7 +187,7 @@ pub fn process_imu_sample(
         // 차량 yaw는 IMU 롤 축을 기준으로 90도 오프셋이 존재한다고 가정한다.
         let raw_roll = orientation[1];
         // 롤 축 증가 방향이 차량 yaw 기준과 반대이므로 오프셋에서 빼서 부호를 보정한다. ㅗ
-        let yaw = wrap_angle(IMU_ROLL_YAW_OFFSET_RAD + raw_roll);
+        let yaw = wrap_angle(IMU_ROLL_YAW_OFFSET_RAD - raw_roll);
         yaw_candidate = Some((yaw, LocalizationYawSource::ImuRoll));
         runtime.yaw_axis = Some(OrientationAxis::Roll);
         runtime.yaw_bias = IMU_ROLL_YAW_OFFSET_RAD;
