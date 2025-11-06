@@ -35,6 +35,7 @@ macro_rules! runtime_eprintln {
     };
 }
 const PATH_PREVIEW_INTERVAL: Duration = Duration::from_millis(200);
+const LANE_LOG_INTERVAL: Duration = Duration::from_millis(500);
 const PATH_CANVAS_SIZE: i32 = 640;
 
 struct MapWaypoints {
@@ -99,6 +100,9 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
     let mut latest_localization_state: Option<DtoLocalizationState> = None;
     let mut last_path_preview = Instant::now()
         .checked_sub(PATH_PREVIEW_INTERVAL)
+        .unwrap_or_else(Instant::now);
+    let mut last_lane_log = Instant::now()
+        .checked_sub(LANE_LOG_INTERVAL)
         .unwrap_or_else(Instant::now);
 
     // Ctrl-C 입력을 감시해 사용자의 종료 요청을 처리한다.
@@ -302,8 +306,16 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
 
             // 차선 각도 결과를 로그로 출력한다.
             result = lane_angle_rx.recv() => match result {
-                Ok(_lane_angle) => {
-                    //runtime_println!("Angle: {}, alive_cnt: {}", _lane_angle.angle, _lane_angle.alive_cnt);
+                Ok(lane_angle) => {
+                    if last_lane_log.elapsed() >= LANE_LOG_INTERVAL {
+                        runtime_println!(
+                            "[LANE] angle={:.2}deg offset={:.2}px alive_cnt={}",
+                            lane_angle.angle,
+                            lane_angle.lateral_offset,
+                            lane_angle.alive_cnt
+                        );
+                        last_lane_log = Instant::now();
+                    }
                 }
                 Err(RecvError::Lagged(n)) => {
                     runtime_eprintln!("[MAIN] Lane angle lagged by {}", n);
