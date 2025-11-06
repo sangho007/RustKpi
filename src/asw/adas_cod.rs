@@ -35,7 +35,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     // 최신 신호 캐시
     let mut latest_path: Option<Arc<DtoAdasSmoothedPath>> = None;
     let mut latest_state: Option<Arc<DtoLocalizationState>> = None;
-    let mut _latest_lane_angle: Option<Arc<DtoCamLaneAngle>> = None;
+    let mut latest_lane_angle: Option<Arc<DtoCamLaneAngle>> = None;
     let mut last_cmd_deg: u32 = calib.servo_neutral_deg;
     let mut last_log: Instant = Instant::now();
     let mut integral_error: f64 = 0.0;
@@ -79,7 +79,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
                 while let Ok(newer) = lane_angle_rx.try_recv() {
                     newest = newer;
                 }
-                _latest_lane_angle = Some(newest);
+                latest_lane_angle = Some(newest);
             }
             Err(TryRecvError::Lagged(n)) => {
                 eprintln!("[{}] ADAS lateral lane_angle lagged by {}", id, n);
@@ -132,8 +132,15 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             prev_error = None;
         }
 
+        let lane_offset_px = latest_lane_angle
+            .as_ref()
+            .map(|lane| lane.lateral_offset)
+            .unwrap_or(0.0);
+
         //let base_cmd = calib.servo_neutral_deg as f64 - pid_output; -> good !!!!!
-        let base_cmd = calib.servo_neutral_deg as f64 - 10.0 * current_error.unwrap_or(0.0) + 0.05 * _latest_lane_angle.as_ref().unwrap().lateral_offset;
+        let base_cmd = calib.servo_neutral_deg as f64
+            - 10.0 * current_error.unwrap_or(0.0)
+            + 0.05 * lane_offset_px;
 
         let target_deg = base_cmd
             .round()
