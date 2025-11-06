@@ -48,10 +48,11 @@ pub fn servo_channels() -> [Channel; 2] {
 pub fn angle_to_pwm(angle: u32) -> u16 {
     // 안전을 위해 각도를 0-180도 범위로 제한
     let clamped_angle = angle.clamp(0, 180);
+    let converted_angle = 180 - clamped_angle;
     let calib = calibration();
     // SERVO_MIN과 SERVO_MAX 사이를 선형 보간하여 PWM 값을 계산
     let pwm_value = calib.servo_min as f64
-        + (clamped_angle as f64 / 180.0) * (calib.servo_max - calib.servo_min) as f64;
+        + (converted_angle as f64 / 180.0) * (calib.servo_max - calib.servo_min) as f64;
     pwm_value.round() as u16
 }
 
