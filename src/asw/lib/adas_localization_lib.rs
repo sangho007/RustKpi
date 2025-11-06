@@ -164,7 +164,7 @@ pub fn process_imu_sample(
     ];
 
     let map_position = [
-        start_coord.x as f64 + displacement[0],
+        start_coord.x as f64 - displacement[0],
         start_coord.y as f64 - displacement[2],
     ];
 
