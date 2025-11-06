@@ -28,7 +28,7 @@ impl Default for RoiCalibration {
         Self {
             vertices:[
             (0, 240),
-            (160, 100),
+            (170, 100),
             (480, 100),
             (640, 240),
             ],

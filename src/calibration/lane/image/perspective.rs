@@ -40,7 +40,7 @@ impl Default for PerspectiveCalibration {
         Self {
             source: [
                 (0.0, 240.0),
-                (160.0, 150.0),
+                (170.0, 150.0),
                 (480.0, 150.0),
                 (640.0, 240.0),
             ],
