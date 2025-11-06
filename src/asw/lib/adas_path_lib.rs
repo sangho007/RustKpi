@@ -1182,7 +1182,7 @@ pub fn smooth_local_path(
     }
 
     let tangent = heading;
-    let normal = [-tangent[1], tangent[0]];
+    let normal = [tangent[1], -tangent[0]];
 
     let mut s_values = Vec::with_capacity(waypoints.len() + 1);
     let mut d_values = Vec::with_capacity(waypoints.len() + 1);
