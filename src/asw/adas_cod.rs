@@ -116,7 +116,9 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             prev_error = None;
         }
 
-        let base_cmd = calib.servo_neutral_deg as f64 - pid_output;
+        //let base_cmd = calib.servo_neutral_deg as f64 - pid_output;
+        let base_cmd = calib.servo_neutral_deg as f64 - current_error;
+
         let target_deg = base_cmd
             .round()
             .clamp(calib.servo_min_deg as f64, calib.servo_max_deg as f64)
