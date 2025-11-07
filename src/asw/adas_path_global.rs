@@ -213,6 +213,13 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                                 lane_change_in_progress = false;
                                 continue;
                             }
+                            if matches!(
+                                lane_state,
+                                AdasLaneChangeState::InnerCruise | AdasLaneChangeState::OuterCruise
+                            ) {
+                                lane_change_in_progress = false;
+                                continue;
+                            }
                             let within_tolerance = latest_state
                                 .as_ref()
                                 .and_then(|state| {
