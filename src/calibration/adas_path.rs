@@ -65,7 +65,7 @@ impl Default for AdasPathGlobalCalibration {
             vehicle_length_m: 0.20,
             max_lane_change_offset_m: 1.0,
             forward_tolerance_m: 0.02,
-            lane_change_penalty_m: 0.5,
+            lane_change_penalty_m: 1.0,
             forced_lane_change_penalty_m: -0.5,
             max_lane_changes: 5,
             forced_max_lane_changes: 2,
@@ -101,9 +101,9 @@ pub struct AdasPathLocalCalibration {
 impl Default for AdasPathLocalCalibration {
     fn default() -> Self {
         Self {
-            waypoint_window: 10,
+            waypoint_window: 15,
             smoothing_sample_count: 20,
-            smoothing_skip_head: 3,
+            smoothing_skip_head: 5,
             smoothing_min_samples: 6,
         }
     }
