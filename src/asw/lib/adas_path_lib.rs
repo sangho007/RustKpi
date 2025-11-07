@@ -1064,6 +1064,13 @@ pub fn try_publish_local_path(
         segment.push(wp.clone());
     }
 
+    if end == global_path.waypoints.len() {
+        if let Some(goal) = global_path.waypoints.last() {
+            segment.clear();
+            segment.push(goal.clone());
+        }
+    }
+
     let plan_id = global_path.alive_cnt;
     let dto = Arc::new(DtoAdasLocalPath::new(
         global_path.map_id,

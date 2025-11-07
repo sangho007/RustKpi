@@ -20,7 +20,7 @@
 - `refresh_blocked_nodes(...)`: 만료된 차단 항목을 제거하고 캐시를 갱신합니다.
 
 ## 로컬 경로 및 스무딩
-- `try_publish_local_path(...)`: 전역 경로와 로컬라이제이션 상태에서 차량 주변 일정 구간(`AdasPathLocalCalibration::waypoint_window`)을 잘라 `DtoAdasLocalPath`로 게시합니다.
+- `try_publish_local_path(...)`: 전역 경로와 로컬라이제이션 상태에서 차량 주변 일정 구간(`AdasPathLocalCalibration::waypoint_window`)을 잘라 `DtoAdasLocalPath`로 게시하며, 남은 waypoint가 로컬 창과 동일할 때는 목적지 단일 포인트만 남겨 최종 목표를 직접 추종하게 합니다.
 - `smooth_local_path(waypoints, state, sample_count)`: 프레네 좌표로 변환 후 5차 다항식 곡선을 피팅해 균일 간격 샘플을 생성합니다. 필요 시 선행 waypoint는 `AdasPathLocalCalibration::smoothing_skip_head`만큼 제외합니다. 실패 시 원본 waypoint를 반환합니다.
 - `curvature_from_smoothed_path(...)`: 스무딩 샘플에서 곡률을 계산해 횡방향 제어에 활용합니다.
 - `determine_lane_change_state(...)`: 로컬 경로에 inner/outer waypoint가 혼재하는지 확인해 `AdasLaneChangeState`를 판정합니다.
