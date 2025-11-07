@@ -67,7 +67,7 @@ impl Default for AdasPathGlobalCalibration {
             vehicle_length_m: 0.20,
             max_lane_change_offset_m: 1.0,
             forward_tolerance_m: 0.02,
-            lane_change_penalty_m: 1.0,
+            lane_change_penalty_m: 0.2,
             forced_lane_change_penalty_m: -0.5,
             max_lane_changes: 5,
             forced_max_lane_changes: 2,
