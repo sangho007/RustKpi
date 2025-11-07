@@ -91,8 +91,8 @@ impl Default for AdasPathGlobalCalibration {
             lane_change_completion_heading_tolerance_deg: 5.0,
             lane_change_forbidden_lookahead_m: 0.5,
             lane_change_forbidden_penalty_scale: 0.4,
-            global_planner: GlobalPathPlanner::HybridAStar,
-            //global_planner: GlobalPathPlanner::AStar,
+            //global_planner: GlobalPathPlanner::HybridAStar,
+            global_planner: GlobalPathPlanner::AStar,
         }
     }
 }
