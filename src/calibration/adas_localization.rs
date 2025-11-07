@@ -195,7 +195,7 @@ pub const LOCALIZATION_ACTIVE_SCENARIO: LocalizationScenarioSelection =
     LocalizationScenarioSelection {
         map: LocalizationMapId::Crossroad,
         start: CROSSROAD_STARTS[0],
-        destination: CROSSROAD_DESTINATIONS[3],
+        destination: CROSSROAD_DESTINATIONS[1],
 
         //map: LocalizationMapId::OneLane,
         //start: ONE_LANE_STARTS[0],
