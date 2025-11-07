@@ -442,7 +442,7 @@ impl PathGraph {
         const TURN_PENALTY_COEFF: f64 = 2.0; // 1.5
         const HEADING_HEURISTIC_WEIGHT: f64 = 0.75; // 0.75
         const MAX_BASE_HEADING_DELTA: f64 = PI / 2.0;
-        const MAX_LANE_CHANGE_DELTA: f64 = PI * 0.75;
+        const MAX_LANE_CHANGE_DELTA: f64 = PI * 0.5;
 
         let goal_heading_idx = {
             let goal_heading = self
