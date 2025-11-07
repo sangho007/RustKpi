@@ -17,11 +17,14 @@ use std::time::{Duration, Instant};
 
 pub const MOTION_HEADING_MIN_STEP_M: f64 = 0.01; // 1cm 이상 움직였을 때만 헤딩 계산.
 pub const IMU_ROLL_YAW_OFFSET_RAD: f64 = PI / 2.0; // 롤 값이 차량 yaw보다 90도 뒤쳐져 있는 경우.
+pub const IMU_POSITION_LPF_ALPHA: f64 = 0.2; // 위치 노이즈를 줄이기 위한 1차 LPF 계수.
 
 /// ADAS Localization에서 반복적으로 사용하는 런타임 상태 묶음. gg
 pub struct LocalizationRuntime {
     /// IMU 절대 좌표의 기준점(초기 위치). None이면 아직 설정되지 않음.
     pub base_imu_position: Option<[f64; 3]>,
+    /// LPF를 거친 최신 변위. None이면 필터가 아직 초기화되지 않음.
+    pub filtered_displacement: Option<[f64; 3]>,
     /// 직전 계산된 맵 좌표. 누적 변위가 충분할 때만 heading 계산에 활용한다.
     pub last_map_position: Option<[f64; 2]>,
     /// 가장 최근 yaw 결과와 데이터 출처(센서, 추정 등). 센서 공백 시 fallback 용도.
@@ -38,6 +41,7 @@ impl LocalizationRuntime {
     pub fn new() -> Self {
         Self {
             base_imu_position: None,
+            filtered_displacement: None,
             last_map_position: None,
             last_yaw: None,
             yaw_axis: None,
@@ -157,11 +161,24 @@ pub fn process_imu_sample(
         );
     }
     let base = runtime.base_imu_position.unwrap();
-    let displacement = [
+    let raw_displacement = [
         imu_position[0] - base[0],
         imu_position[1] - base[1],
         imu_position[2] - base[2],
     ];
+
+    let displacement = if let Some(prev) = runtime.filtered_displacement {
+        let filtered = [
+            prev[0] + IMU_POSITION_LPF_ALPHA * (raw_displacement[0] - prev[0]),
+            prev[1] + IMU_POSITION_LPF_ALPHA * (raw_displacement[1] - prev[1]),
+            prev[2] + IMU_POSITION_LPF_ALPHA * (raw_displacement[2] - prev[2]),
+        ];
+        runtime.filtered_displacement = Some(filtered);
+        filtered
+    } else {
+        runtime.filtered_displacement = Some(raw_displacement);
+        raw_displacement
+    };
 
     let map_position = [
         start_coord.x as f64 + displacement[0],

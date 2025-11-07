@@ -90,7 +90,7 @@ src
 - Vision_TrafficLight (`src/asw/vs_trafficlight.rs`): HSV + 모폴로지 + DBSCAN으로 신호색을 추정하고 디텍션 간격을 캘리브레이션합니다.
 - UltraSonic_ForwardCollision (`src/asw/forwardcollision_ultrasonic.rs`): 거리 임계값 기반 장애물 이벤트 생성.
 - ADAS Control (`src/asw/adas_cod.rs`): 차선 각도를 비례 제어 + `max_servo_delta_deg` 레이트 제한으로 서보 명령을 만들고, 초음파/신호등/거리 임계값을 통합한 정지·감속·순항 상태 머신을 구동합니다. 황색·소등 신호나 근접 거리는 감속 모드로 전환합니다.
-- ADAS Localization & Path (`src/asw/adas_localization.rs`, `src/asw/adas_path_local.rs`, `src/asw/adas_path_global.rs`): 글로벌 맵과 로컬 궤적 계획을 위한 플레이스홀더입니다.
+- ADAS Localization & Path (`src/asw/adas_localization.rs`, `src/asw/adas_path_local.rs`, `src/asw/adas_path_global.rs`): 글로벌 맵과 로컬 궤적 계획을 위한 플레이스홀더이며, IMU 위치 샘플에 1차 LPF를 적용해 노이즈를 줄입니다.
 
 
 ### RTE 채널 흐름
