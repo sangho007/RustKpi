@@ -39,9 +39,9 @@ impl Default for AdasLateralCalibration {
 impl AdasLateralCalibration {
     fn baseline() -> Self {
         Self {
-            pid_kp: 150.0,
+            pid_kp: -600.0,
             pid_ki: 0.0,
-            pid_kd: 0.0,
+            pid_kd: 10.0,
             pid_integral_limit: 0.5,
             pid_sample_index: 4,
             servo_neutral_deg: 90,

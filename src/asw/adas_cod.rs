@@ -40,6 +40,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     let mut last_log: Instant = Instant::now();
     let mut integral_error: f64 = 0.0;
     let mut prev_error: Option<f64> = None;
+    let mut pid_output:f64 = 0.0;
 
     loop {
         // 새 메시지가 도착했으면 최신으로 드레인
@@ -116,9 +117,30 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             .map(|lane| lane.lateral_offset)
             .unwrap_or(0.0);
 
+        if let Some(error) = current_error {
+            integral_error += error * dt_sec;
+            if calib.pid_integral_limit > 0.0 {
+                let limit = calib.pid_integral_limit;
+                integral_error = integral_error.clamp(-limit, limit);
+            }
+            let derivative = if let Some(prev) = prev_error {
+                (error - prev) / dt_sec
+            } else {
+                0.0
+            };
+            prev_error = Some(error);
+            pid_output =
+                calib.pid_kp * error + calib.pid_ki * integral_error + calib.pid_kd * derivative;
+        } else {
+            // 데이터 부족 시 PID 상태를 리셋해 드리프트를 방지한다.
+            integral_error = 0.0;
+            prev_error = None;
+        }
 
-        let base_cmd = calib.servo_neutral_deg as f64
-            - 450.0 * current_error.unwrap_or(0.0);
+        let base_cmd = calib.servo_neutral_deg as f64 + pid_output;
+
+        //let base_cmd = calib.servo_neutral_deg as f64
+        //    - 450.0 * current_error.unwrap_or(0.0);
             //+ 0.05 * lane_offset_px;
 
         let target_deg = base_cmd
