@@ -139,9 +139,12 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             .unwrap_or(0.0);
 
         //let base_cmd = calib.servo_neutral_deg as f64 - pid_output; -> good !!!!!
-        println!("[ADAS-COD] current Lat error : {}", current_error.unwrap_or(0.0));
+
         let base_cmd = calib.servo_neutral_deg as f64
             - 100.0 * current_error.unwrap_or(0.0);
+        println!("[ADAS-COD] current Lat error : {}", current_error.unwrap_or(0.0));
+        println!("[ADAS-COD] base cmd : {}", base_cmd);
+
             //+ 0.05 * lane_offset_px;
 
         let target_deg = base_cmd
