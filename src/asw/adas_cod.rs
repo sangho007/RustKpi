@@ -40,6 +40,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     let mut last_log: Instant = Instant::now();
     let mut integral_error: f64 = 0.0;
     let mut prev_error: Option<f64> = None;
+    let mut raw_error: f64 = 0.0;
 
     loop {
         // 새 메시지가 도착했으면 최신으로 드레인
@@ -139,7 +140,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
 
         //let base_cmd = calib.servo_neutral_deg as f64 - pid_output; -> good !!!!!
         let base_cmd = calib.servo_neutral_deg as f64
-            - 10.0 * current_error.unwrap_or(0.0);
+            - 100.0 * current_error.unwrap_or(0.0);
             //+ 0.05 * lane_offset_px;
 
         let target_deg = base_cmd
