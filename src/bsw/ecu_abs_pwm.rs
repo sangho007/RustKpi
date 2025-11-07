@@ -9,7 +9,11 @@ use linux_embedded_hal::I2cdev;
 use std::time::Instant;
 
 use pwm_pca9685::{Address, Channel, Pca9685};
-use tokio::{select, signal, sync::broadcast::error::RecvError};
+use tokio::{
+    select, signal,
+    sync::broadcast::error::TryRecvError,
+    time::{interval, Duration},
+};
 
 /// PCA9685 기반 액추에이터 제어 태스크를 실행한다.
 /// - 서보/모터 채널을 캘리브레이션 정보에 맞춰 초기화한다.
@@ -94,9 +98,11 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
     let mut last_dc_log = Instant::now();
     let mut ctrl_c_signal = signal::ctrl_c();
     tokio::pin!(ctrl_c_signal);
+    let mut poll_interval = interval(Duration::from_millis(50));
 
     // --- 들어오는 명령어를 처리하는 메인 루프 ---
     loop {
+        let mut should_terminate = false;
         select! {
             ctrl_c_result = &mut ctrl_c_signal => {
                 match ctrl_c_result {
@@ -105,101 +111,114 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
                 }
                 break;
             }
-            servo_result = servo_rx.recv() => {
-                match servo_result {
-                    Ok(servo_dto) => {
-                        if let Some(&target_channel) = pwm_calibration.servo_channels.get(servo_dto.channel as usize) {
-                            println!("[BSW] Demand cmd : {}", servo_dto.angle);
-                            let pwm_val_steer = angle_to_pwm_steer(servo_dto.angle);
-                            let pwm_val_ultrasonic = angle_to_pwm_ultrasonic(servo_dto.angle);
-                            println!("[BSW] Demand steer pwm : {}", pwm_val_steer);
+            _ = poll_interval.tick() => {
+                loop {
+                    match servo_rx.try_recv() {
+                        Ok(servo_dto) => {
+                            if let Some(&target_channel) = pwm_calibration.servo_channels.get(servo_dto.channel as usize) {
+                                println!("[BSW] Demand cmd : {}", servo_dto.angle);
+                                let pwm_val_steer = angle_to_pwm_steer(servo_dto.angle);
+                                let pwm_val_ultrasonic = angle_to_pwm_ultrasonic(servo_dto.angle);
+                                println!("[BSW] Demand steer pwm : {}", pwm_val_steer);
 
-                            // 서보에 전달되는 듀티비를 채널 별 변환 함수로 적용한다.
-                            let result = match target_channel {
-                                Channel::C0 => pwm.set_channel_off(target_channel, pwm_val_steer),
-                                Channel::C2 => pwm.set_channel_off(target_channel, pwm_val_ultrasonic),
-                                _ => pwm.set_channel_off(Channel::C1, pwm_val_steer),
-                            };
+                                // 서보에 전달되는 듀티비를 채널 별 변환 함수로 적용한다.
+                                let result = match target_channel {
+                                    Channel::C0 => pwm.set_channel_off(target_channel, pwm_val_steer),
+                                    Channel::C2 => pwm.set_channel_off(target_channel, pwm_val_ultrasonic),
+                                    _ => pwm.set_channel_off(Channel::C1, pwm_val_steer),
+                                };
 
-                            if let Err(e) = result {
-                                eprintln!(
-                                    "[BSW] 서보 채널 {:?} OFF 값 설정 실패: {:?}",
-                                    target_channel, e
-                                );
-                            }
-
-                            let idx = servo_dto.channel as usize;
-                            if idx >= servo_state.len() {
-                                servo_state.resize(idx + 1, None);
-                            }
-                            if let Some(state_slot) = servo_state.get_mut(idx) {
-                                let previous = *state_slot;
-                                *state_slot = Some(servo_dto.angle);
-                                if previous != Some(servo_dto.angle) || last_servo_log.elapsed() >= pwm_calibration.servo_log_interval {
-                                    let summary = servo_state.iter().enumerate()
-                                        .map(|(channel, angle)| match angle {
-                                            Some(a) => format!("C{}={}", channel, a),
-                                            None => format!("C{}=--", channel),
-                                        })
-                                        .collect::<Vec<_>>()
-                                        .join(", ");
-                                    println!("[BSW] 서보 상태 요약: {}", summary);
-                                    last_servo_log = Instant::now();
+                                if let Err(e) = result {
+                                    eprintln!(
+                                        "[BSW] 서보 채널 {:?} OFF 값 설정 실패: {:?}",
+                                        target_channel, e
+                                    );
                                 }
-                            }
-                        } else {
-                            eprintln!("[BSW] 잘못된 서보 채널 번호 수신: {}", servo_dto.channel);
-                        }
-                    }
-                    Err(RecvError::Lagged(n)) => {
-                        eprintln!("[{}] Servo command lagged by {}", id, n);
-                    }
-                    Err(RecvError::Closed) => {
-                        eprintln!("[{}] Servo command channel closed.", id);
-                        break;
-                    }
-                }
-            }
-            dc_result = dc_rx.recv() => {
-                match dc_result {
-                    Ok(dcmotor_dto) => {
-                        match dcmotor_dto.direction {
-                            1 => { // 정방향
-                                // 듀얼 모터 모두 동일한 속도로 구동한다.
-                                motor_control(&mut pwm, Motor::M1, Direction::Forward, percent_to_pwm(dcmotor_dto.speed));
-                                motor_control(&mut pwm, Motor::M2, Direction::Forward, percent_to_pwm(dcmotor_dto.speed));
-                            },
-                            2 => { // 역방향
-                                motor_control(&mut pwm, Motor::M1, Direction::Backward, percent_to_pwm(dcmotor_dto.speed));
-                                motor_control(&mut pwm, Motor::M2, Direction::Backward, percent_to_pwm(dcmotor_dto.speed));
-                            },
-                            0 => { // 정지
-                                motor_stop(&mut pwm, Motor::M1);
-                                motor_stop(&mut pwm, Motor::M2);
-                            },
-                            _ => continue,
-                        }
 
-                        let current_state = (dcmotor_dto.direction, dcmotor_dto.speed);
-                        let state_changed = last_dc_state.map(|s| s != current_state).unwrap_or(true);
-                        if state_changed || last_dc_log.elapsed() >= pwm_calibration.dc_log_interval {
-                            println!(
-                                "[BSW] DC 모터 상태: 방향 {}, 속도 {}",
-                                current_state.0, current_state.1
-                            );
-                            last_dc_log = Instant::now();
+                                let idx = servo_dto.channel as usize;
+                                if idx >= servo_state.len() {
+                                    servo_state.resize(idx + 1, None);
+                                }
+                                if let Some(state_slot) = servo_state.get_mut(idx) {
+                                    let previous = *state_slot;
+                                    *state_slot = Some(servo_dto.angle);
+                                    if previous != Some(servo_dto.angle) || last_servo_log.elapsed() >= pwm_calibration.servo_log_interval {
+                                        let summary = servo_state.iter().enumerate()
+                                            .map(|(channel, angle)| match angle {
+                                                Some(a) => format!("C{}={}", channel, a),
+                                                None => format!("C{}=--", channel),
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join(", ");
+                                        println!("[BSW] 서보 상태 요약: {}", summary);
+                                        last_servo_log = Instant::now();
+                                    }
+                                }
+                            } else {
+                                eprintln!("[BSW] 잘못된 서보 채널 번호 수신: {}", servo_dto.channel);
+                            }
                         }
-                        last_dc_state = Some(current_state);
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Lagged(n)) => {
+                            eprintln!("[{}] Servo command lagged by {}", id, n);
+                            continue;
+                        }
+                        Err(TryRecvError::Closed) => {
+                            eprintln!("[{}] Servo command channel closed.", id);
+                            should_terminate = true;
+                            break;
+                        }
                     }
-                    Err(RecvError::Lagged(n)) => {
-                        eprintln!("[{}] DC motor command lagged by {}", id, n);
-                    }
-                    Err(RecvError::Closed) => {
-                        eprintln!("[{}] DC motor command channel closed.", id);
-                        break;
+                }
+
+                loop {
+                    match dc_rx.try_recv() {
+                        Ok(dcmotor_dto) => {
+                            match dcmotor_dto.direction {
+                                1 => { // 정방향
+                                    // 듀얼 모터 모두 동일한 속도로 구동한다.
+                                    motor_control(&mut pwm, Motor::M1, Direction::Forward, percent_to_pwm(dcmotor_dto.speed));
+                                    motor_control(&mut pwm, Motor::M2, Direction::Forward, percent_to_pwm(dcmotor_dto.speed));
+                                },
+                                2 => { // 역방향
+                                    motor_control(&mut pwm, Motor::M1, Direction::Backward, percent_to_pwm(dcmotor_dto.speed));
+                                    motor_control(&mut pwm, Motor::M2, Direction::Backward, percent_to_pwm(dcmotor_dto.speed));
+                                },
+                                0 => { // 정지
+                                    motor_stop(&mut pwm, Motor::M1);
+                                    motor_stop(&mut pwm, Motor::M2);
+                                },
+                                _ => continue,
+                            }
+
+                            let current_state = (dcmotor_dto.direction, dcmotor_dto.speed);
+                            let state_changed = last_dc_state.map(|s| s != current_state).unwrap_or(true);
+                            if state_changed || last_dc_log.elapsed() >= pwm_calibration.dc_log_interval {
+                                println!(
+                                    "[BSW] DC 모터 상태: 방향 {}, 속도 {}",
+                                    current_state.0, current_state.1
+                                );
+                                last_dc_log = Instant::now();
+                            }
+                            last_dc_state = Some(current_state);
+                        }
+                        Err(TryRecvError::Empty) => break,
+                        Err(TryRecvError::Lagged(n)) => {
+                            eprintln!("[{}] DC motor command lagged by {}", id, n);
+                            continue;
+                        }
+                        Err(TryRecvError::Closed) => {
+                            eprintln!("[{}] DC motor command channel closed.", id);
+                            should_terminate = true;
+                            break;
+                        }
                     }
                 }
             }
+        }
+
+        if should_terminate {
+            break;
         }
     }
 
