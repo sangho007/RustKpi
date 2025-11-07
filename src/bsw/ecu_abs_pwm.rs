@@ -112,12 +112,13 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
                             println!("[BSW] Demand cmd : {}", servo_dto.angle);
                             let pwm_val_steer = angle_to_pwm_steer(servo_dto.angle);
                             let pwm_val_ultrasonic = angle_to_pwm_ultrasonic(servo_dto.angle);
+                            println!("[BSW] Demand steer pwm : {}", pwm_val_steer);
 
                             // 서보에 전달되는 듀티비를 채널 별 변환 함수로 적용한다.
                             let result = match target_channel {
                                 Channel::C0 => pwm.set_channel_off(target_channel, pwm_val_steer),
                                 Channel::C2 => pwm.set_channel_off(target_channel, pwm_val_ultrasonic),
-                                _ => pwm.set_channel_off(target_channel, pwm_val_steer),
+                                _ => pwm.set_channel_off(Channel::C1, pwm_val_steer),
                             };
 
                             if let Err(e) = result {
