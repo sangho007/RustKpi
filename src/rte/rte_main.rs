@@ -8,7 +8,7 @@ use crate::rte::rte_dto::{
     DtoUltraSonicObstacle, DtoUltraSonicRaw,
 };
 use std::sync::Arc;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 pub type CamRawSender = broadcast::Sender<Arc<DtoCamRaw>>;
 pub type CamProcessedSender = broadcast::Sender<Arc<DtoCamProcessed>>;
@@ -109,6 +109,7 @@ pub struct RteChannels {
     pub imu: ImuChannels,
     pub localization: LocalizationChannels,
     pub path: PathChannels,
+    pub shutdown: ShutdownSignal,
 }
 
 /// RTE 시스템 초기화 결과.
@@ -137,6 +138,8 @@ pub fn init() -> RteSystem {
     let (path_global_tx, _) = broadcast::channel(PATH_GLOBAL_CAPACITY);
     let (path_local_tx, _) = broadcast::channel(PATH_LOCAL_CAPACITY);
     let (path_smoothed_tx, _) = broadcast::channel(PATH_SMOOTHED_CAPACITY);
+
+    let (shutdown_tx, _) = watch::channel(false);
 
     let camera = CameraChannels {
         raw_tx: cam_raw_tx,
@@ -182,6 +185,25 @@ pub fn init() -> RteSystem {
             imu,
             localization,
             path,
+            shutdown: ShutdownSignal::new(shutdown_tx),
         },
+    }
+}
+#[derive(Clone)]
+pub struct ShutdownSignal {
+    tx: watch::Sender<bool>,
+}
+
+impl ShutdownSignal {
+    pub fn new(tx: watch::Sender<bool>) -> Self {
+        Self { tx }
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<bool> {
+        self.tx.subscribe()
+    }
+
+    pub fn trigger(&self) {
+        let _ = self.tx.send(true);
     }
 }

@@ -11,11 +11,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::io::{AsyncReadExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 /// 아이폰이 USB 터널을 통해 전송하는 IMU 스트림을 수신한다.
 /// 리스너는 상시 대기하며 새 연결이 수립되면 패킷을 읽어 RTE 채널로 전달한다.
-pub async fn ea_usb_tcp_gateway(channels: TcpChannels) {
+pub async fn ea_usb_tcp_gateway(channels: TcpChannels, shutdown: &mut watch::Receiver<bool>) {
     let calibration = ComCalibration::default();
     // 아이폰에서 전송되는 USB 터널링 포트를 수신하기 위해 지정된 주소로 바인딩한다.
     let listener = match TcpListener::bind((calibration.tcp_host, calibration.tcp_port)).await {
@@ -35,15 +36,23 @@ pub async fn ea_usb_tcp_gateway(channels: TcpChannels) {
         }
     };
 
-    let ctrl_c = tokio::signal::ctrl_c();
-    tokio::pin!(ctrl_c);
-
     // 모든 연결에서 공유하는 Alive 카운터. 프레임 순서를 추적한다.
     let alive_counter = Arc::new(AtomicU32::new(0));
     let mut workers: Vec<JoinHandle<()>> = Vec::new();
 
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+
     loop {
         tokio::select! {
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    println!("[BSW][COM] Shutdown signal received, stopping TCP gateway.");
+                    break;
+                } else {
+                    continue;
+                }
+            }
             _ = &mut ctrl_c => {
                 println!("[BSW][COM] Ctrl-C received, shutting down TCP gateway.");
                 break;

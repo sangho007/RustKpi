@@ -106,8 +106,9 @@ async fn main() -> opencv::Result<()> {
     // BSW Com Task
     {
         let com = channels.com.clone();
+        let mut shutdown_rx = channels.shutdown.subscribe();
         tasks.push(tokio::spawn(async move {
-            bsw::ecu_abs_com::ea_usb_tcp_gateway(com).await;
+            bsw::ecu_abs_com::ea_usb_tcp_gateway(com, &mut shutdown_rx).await;
         }));
     }
 
@@ -249,7 +250,9 @@ async fn main() -> opencv::Result<()> {
     }
 
     // GUI 및 신호 처리 루프를 실행한다.
-    let result = main_runtime::run(channels).await;
+    let runtime_channels = channels.clone();
+    let result = main_runtime::run(runtime_channels).await;
+    channels.shutdown.trigger();
 
     // 실행 중이던 태스크를 정리한다.
     for handle in tasks {
