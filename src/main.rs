@@ -131,8 +131,9 @@ async fn main() -> opencv::Result<()> {
     // BSW Pwm Task
     {
         let control = channels.control.clone();
+        let shutdown = channels.shutdown.subscribe();
         tasks.push(tokio::spawn(async move {
-            bsw::ecu_abs_pwm::ea_pca9685_actuator("PCA9685", control).await;
+            bsw::ecu_abs_pwm::ea_pca9685_actuator("PCA9685", control, shutdown).await;
         }));
     }
 

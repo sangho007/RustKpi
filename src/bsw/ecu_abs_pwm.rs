@@ -11,7 +11,7 @@ use std::time::Instant;
 use pwm_pca9685::{Address, Channel, Pca9685};
 use tokio::{
     select, signal,
-    sync::broadcast::error::TryRecvError,
+    sync::{broadcast::error::TryRecvError, watch},
     time::{interval, Duration},
 };
 
@@ -19,7 +19,11 @@ use tokio::{
 /// - 서보/모터 채널을 캘리브레이션 정보에 맞춰 초기화한다.
 /// - 브로드캐스트 채널로부터 명령을 구독하여 하드웨어에 즉시 반영한다.
 /// - Ctrl-C 신호가 들어오면 안전하게 장치를 비활성화한다.
-pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
+pub async fn ea_pca9685_actuator(
+    id: &'static str,
+    control: ControlChannels,
+    mut shutdown: watch::Receiver<bool>,
+) {
     let pwm_calibration = PwmCalibration::default();
     // --- I2C 및 PCA9685 드라이버 초기화 ---
     let i2c_dev = match I2cdev::new(pwm_calibration.i2c_bus) {
@@ -104,6 +108,14 @@ pub async fn ea_pca9685_actuator(id: &'static str, control: ControlChannels) {
     loop {
         let mut should_terminate = false;
         select! {
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    println!("[BSW] Shutdown signal 수신, PCA9685 태스크를 종료합니다.");
+                    break;
+                } else {
+                    continue;
+                }
+            }
             ctrl_c_result = &mut ctrl_c_signal => {
                 match ctrl_c_result {
                     Ok(()) => println!("[BSW] Ctrl-C 신호 감지, PCA9685 액추에이터를 종료합니다."),
