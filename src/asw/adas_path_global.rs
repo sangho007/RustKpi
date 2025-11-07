@@ -11,6 +11,7 @@ use crate::rte::rte_dto::{
 };
 use crate::rte::rte_main::RteChannels;
 use std::collections::{HashMap, HashSet};
+use std::f64::consts::PI;
 use std::time::Instant;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::{self, MissedTickBehavior};
@@ -22,6 +23,8 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
     let heading_cos_threshold = (calib.obstacle_block_heading_tolerance_deg as f64)
         .to_radians()
         .cos();
+    let lane_change_heading_tol_rad =
+        (calib.lane_change_completion_heading_tolerance_deg as f64).to_radians();
 
     let graph = match PathGraph::load(scenario.map, &calib) {
         Ok(graph) => graph,
@@ -207,11 +210,12 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                             let within_tolerance = latest_state
                                 .as_ref()
                                 .and_then(|state| {
-                                    lateral_error_to_smoothed_path(state, smoothed_arc.as_ref())
+                                    lane_alignment_error(state, smoothed_arc.as_ref())
                                 })
-                                .map(|err| {
-                                    err.abs()
+                                .map(|(lateral_err, heading_err)| {
+                                    lateral_err.abs()
                                         <= calib.lane_change_completion_tolerance_m as f64
+                                        && heading_err <= lane_change_heading_tol_rad
                                 })
                                 .unwrap_or(true);
                             if within_tolerance {
@@ -375,29 +379,48 @@ fn heading_from_plan(plan: &PlannedPath, idx: usize) -> Option<[f64; 2]> {
     }
 }
 
-fn lateral_error_to_smoothed_path(
+fn lane_alignment_error(
     state: &DtoLocalizationState,
     path: &DtoAdasSmoothedPath,
-) -> Option<f64> {
+) -> Option<(f64, f64)> {
     let sample = path.samples_xy.first()?;
-    let heading_vec = if state.yaw_rad.is_finite() {
-        Some([state.yaw_rad.cos(), state.yaw_rad.sin()])
-    } else if let Some(motion_heading) = state.motion_heading_rad {
-        Some([motion_heading.cos(), motion_heading.sin()])
-    } else if let Some(next) = path.samples_xy.get(1) {
-        Some([
+    let state_heading = if state.yaw_rad.is_finite() {
+        state.yaw_rad
+    } else {
+        state.motion_heading_rad?
+    };
+
+    let path_vec = path.samples_xy.get(1).map(|next| {
+        [
             (next[0] - sample[0]) as f64,
             (next[1] - sample[1]) as f64,
-        ])
-    } else {
-        None
-    }?;
+        ]
+    });
 
-    let tangent = normalize_vec(heading_vec).unwrap_or([1.0, 0.0]);
+    let tangent = path_vec
+        .and_then(normalize_vec)
+        .unwrap_or([state_heading.cos(), state_heading.sin()]);
+    let path_heading = path_vec
+        .map(|vec| vec[1].atan2(vec[0]))
+        .unwrap_or(state_heading);
+
     let normal = [-tangent[1], tangent[0]];
     let diff = [
         sample[0] as f64 - state.position_map_xy[0],
         sample[1] as f64 - state.position_map_xy[1],
     ];
-    Some(diff[0] * normal[0] + diff[1] * normal[1])
+    let lateral = diff[0] * normal[0] + diff[1] * normal[1];
+    let heading_err = angle_difference(path_heading, state_heading).abs();
+    Some((lateral, heading_err))
+}
+
+fn angle_difference(a: f64, b: f64) -> f64 {
+    let mut diff = a - b;
+    while diff > PI {
+        diff -= 2.0 * PI;
+    }
+    while diff < -PI {
+        diff += 2.0 * PI;
+    }
+    diff
 }
