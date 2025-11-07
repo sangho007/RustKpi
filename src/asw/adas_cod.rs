@@ -164,8 +164,8 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
                 .map(|s| format!("{:.2}", s.yaw_rad))
                 .unwrap_or_else(|| "--".to_string());
             println!(
-                "[{}] Lateral PID: error={} integ={:.3} yaw={} state={} -> servo={}deg",
-                id, error_display, integral_error, yaw_display, state_display, last_cmd_deg
+                "[{}] Lateral: yaw={} state={} -> servo={}deg error={} offset={}",
+                id, yaw_display, state_display, last_cmd_deg, current_error.unwrap_or(0.0), lane_offset_px
             );
             last_log = Instant::now();
         }
