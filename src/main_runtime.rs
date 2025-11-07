@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use tokio::{select, sync::broadcast::error::RecvError};
 
 /// GUI 프리뷰를 활성화할지 여부.
-const DEBUG_ON: bool = true;
+const DEBUG_ON: bool = false;
 /// 터미널 로그 출력을 활성화할지 여부.
 const TERMINAL_OUTPUT_ON: bool = false;
 
