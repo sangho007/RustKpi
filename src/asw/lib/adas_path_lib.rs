@@ -439,8 +439,8 @@ impl PathGraph {
         forbidden_penalty_scale: f64,
     ) -> Result<PlannedPath, String> {
         const HEADING_BINS: u16 = 36;
-        const TURN_PENALTY_COEFF: f64 = 1.0; // 1.5
-        const HEADING_HEURISTIC_WEIGHT: f64 = 0.55; // 0.75
+        const TURN_PENALTY_COEFF: f64 = 1.5; // 1.5
+        const HEADING_HEURISTIC_WEIGHT: f64 = 0.75; // 0.75
         const MAX_BASE_HEADING_DELTA: f64 = PI / 2.0;
         const MAX_LANE_CHANGE_DELTA: f64 = PI * 0.75;
 
