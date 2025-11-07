@@ -94,6 +94,16 @@ pub struct AdasLongitudinalCalibration {
     pub cruise_speed_percent: u32,
     /// 신호등 황색이나 근접 객체가 있을 때 사용할 감속 속도(퍼센트)
     pub crawl_speed_percent: u32,
+    /// 기본 목표 속도(m/s). 20cm/s를 지향한다.
+    pub speed_target_mps: f64,
+    /// 속도 PID 비례 게인 (퍼센트 / m/s)
+    pub speed_pid_kp: f64,
+    /// 속도 PID 적분 게인
+    pub speed_pid_ki: f64,
+    /// 속도 PID 미분 게인
+    pub speed_pid_kd: f64,
+    /// 속도 PID 적분 항 한계
+    pub speed_pid_integral_limit: f64,
     /// 감속을 시작할 초음파 거리(cm)
     pub slowdown_distance_cm: f32,
     /// 안전 정지를 위한 최소 거리(cm)
@@ -120,6 +130,11 @@ impl Default for AdasLongitudinalCalibration {
             //crawl_speed_percent: 0,
             cruise_speed_percent: 30,
             crawl_speed_percent: 20,
+            speed_target_mps: 0.2,
+            speed_pid_kp: 300.0,
+            speed_pid_ki: 0.0,
+            speed_pid_kd: 0.0,
+            speed_pid_integral_limit: 0.4,
             slowdown_distance_cm: 60.0,
             stop_distance_cm: 35.0,
             log_interval: Duration::from_secs(1),

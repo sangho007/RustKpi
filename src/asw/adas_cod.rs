@@ -197,6 +197,7 @@ fn apply_speed_rate_limit(
 pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels) {
     let calib = AdasLongitudinalCalibration::default();
 
+    let mut localization_rx = channels.localization.state_tx.subscribe();
     let mut distance_rx = channels.ultrasonic.raw_tx.subscribe();
     let mut obstacle_rx = channels.ultrasonic.obstacle_tx.subscribe();
     let mut traffic_rx = channels.camera.traffic_light_tx.subscribe();
@@ -207,8 +208,10 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let dc_tx = channels.control.dc_motor_tx.clone();
 
     let mut tick = time::interval(calib.control_period);
+    let control_dt = calib.control_period.as_secs_f64();
 
     // 가장 최근의 센싱 정보를 보관해 제어 주기마다 활용한다.
+    let mut latest_state: Option<Arc<DtoLocalizationState>> = None;
     let mut latest_distance: Option<DtoUltraSonicRaw> = None;
     let mut latest_obstacle: Option<Arc<DtoUltraSonicObstacle>> = None;
     let mut latest_signal: Option<DtoTrafficLight> = None;
@@ -216,6 +219,10 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let mut latest_path: Option<Arc<DtoAdasSmoothedPath>> = None;
     let mut latest_arrival: Option<Arc<DtoLocalizationArrival>> = None;
     let mut last_cmd: Option<(u32, u32)> = None;
+    let mut measured_speed_mps: f64 = 0.0;
+    let mut prev_speed_sample: Option<([f64; 2], u64)> = None;
+    let mut speed_pid_integral: f64 = 0.0;
+    let mut speed_pid_prev_error: Option<f64> = None;
     let mut alive_cnt: u32 = 0;
     let mut last_log = Instant::now();
     let mut stop_request_since: Option<Instant> = None;
@@ -267,6 +274,21 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
                     );
                 }
             }
+        }
+
+        // Localization 상태 확인
+        match localization_rx.try_recv() {
+            Ok(dto) => {
+                let mut newest = dto;
+                while let Ok(newer) = localization_rx.try_recv() {
+                    newest = newer;
+                }
+                latest_state = Some(newest);
+            }
+            Err(TryRecvError::Lagged(n)) => {
+                eprintln!("[{}] ADAS longitudinal localization lagged by {}", id, n);
+            }
+            Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
         }
 
         // 초음파 거리 측정값 확인
@@ -355,6 +377,24 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
         }
 
         tick.tick().await;
+
+        if let Some(state) = latest_state.as_deref() {
+            if let Some((prev_pos, prev_ts)) = prev_speed_sample {
+                if state.timestamp_ns > prev_ts {
+                    let dt = (state.timestamp_ns - prev_ts) as f64 * 1e-9;
+                    if dt > 0.0 {
+                        let dx = state.position_map_xy[0] - prev_pos[0];
+                        let dy = state.position_map_xy[1] - prev_pos[1];
+                        let dist = (dx * dx + dy * dy).sqrt();
+                        let speed = dist / dt;
+                        if speed.is_finite() {
+                            measured_speed_mps = speed;
+                        }
+                    }
+                }
+            }
+            prev_speed_sample = Some((state.position_map_xy, state.timestamp_ns));
+        }
 
         // 가장 최근 거리 값과 임계치 비교
         let distance_cm = latest_obstacle
@@ -478,21 +518,54 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             gain *= 0.6;
         }
 
-        let mut desired_command = if gain <= 0.0 {
-            (0, 0)
+        let mut target_speed_mps = if gain <= 0.0 {
+            0.0
         } else {
-            let commanded = (calib.cruise_speed_percent as f64 * gain)
-                .round()
-                .clamp(0.0, calib.cruise_speed_percent as f64) as u32;
-            if commanded == 0 {
-                (0, 0)
-            } else {
-                (1, commanded)
-            }
+            calib.speed_target_mps * gain
         };
         if gating_stop {
-            desired_command = (0, 0);
+            target_speed_mps = 0.0;
         }
+
+        let feedforward_percent = if target_speed_mps <= 0.0 || calib.speed_target_mps <= 0.0 {
+            0.0
+        } else {
+            (target_speed_mps / calib.speed_target_mps)
+                .clamp(0.0, 1.0)
+                * calib.cruise_speed_percent as f64
+        };
+
+        let mut commanded_percent = if target_speed_mps <= 0.0 {
+            speed_pid_integral = 0.0;
+            speed_pid_prev_error = None;
+            0.0
+        } else {
+            let error = target_speed_mps - measured_speed_mps;
+            speed_pid_integral += error * control_dt;
+            if calib.speed_pid_integral_limit > 0.0 {
+                let limit = calib.speed_pid_integral_limit;
+                speed_pid_integral = speed_pid_integral.clamp(-limit, limit);
+            }
+            let derivative = if let Some(prev) = speed_pid_prev_error {
+                (error - prev) / control_dt
+            } else {
+                0.0
+            };
+            speed_pid_prev_error = Some(error);
+            feedforward_percent
+                + calib.speed_pid_kp * error
+                + calib.speed_pid_ki * speed_pid_integral
+                + calib.speed_pid_kd * derivative
+        };
+
+        commanded_percent = commanded_percent.clamp(0.0, calib.cruise_speed_percent as f64);
+        let commanded_percent = commanded_percent.round() as u32;
+
+        let mut desired_command = if commanded_percent == 0 {
+            (0, 0)
+        } else {
+            (1, commanded_percent)
+        };
 
         let previous_speed = last_cmd.map(|(_, spd)| spd).unwrap_or(0);
         let limited_speed = apply_speed_rate_limit(previous_speed, desired_command.1, &calib);
@@ -522,7 +595,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
                 .map(|arrival| format!("{:.2}", arrival.distance_m))
                 .unwrap_or_else(|| "--".to_string());
             println!(
-                "[{}] Longitudinal: dist={}cm arrival={} arrival_dist={}m curvature={:.4} gain={:.2} stop={} lane_change={} accel_req={} path_ready={} signal={:?} -> dir={} speed={}",
+                "[{}] Longitudinal: dist={}cm arrival={} arrival_dist={}m curvature={:.4} gain={:.2} stop={} lane_change={} accel_req={} path_ready={} signal={:?} speed={:.2}m/s target={:.2}m/s throttle={} -> dir={} speed={}",
                 id,
                 distance_str,
                 arrival_state,
@@ -534,6 +607,9 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
                 accelerate_requested,
                 path_ready,
                 traffic_color,
+                measured_speed_mps,
+                target_speed_mps,
+                commanded_percent,
                 command.0,
                 command.1
             );
