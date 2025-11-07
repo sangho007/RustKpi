@@ -67,6 +67,7 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
     let mut lane_change_requested = false;
     let mut lane_change_cooldown_until: Option<Instant> = None;
     let mut lane_change_in_progress = false;
+    let mut lane_change_alignment_ready = false;
 
     let mut tick = time::interval(calib.replanning_period);
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -207,6 +208,11 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                         if changing {
                             lane_change_in_progress = true;
                         } else if lane_change_in_progress {
+                            if !lane_change_alignment_ready {
+                                lane_change_alignment_ready = true;
+                                lane_change_in_progress = false;
+                                continue;
+                            }
                             let within_tolerance = latest_state
                                 .as_ref()
                                 .and_then(|state| {
