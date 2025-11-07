@@ -118,7 +118,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
 
 
         let base_cmd = calib.servo_neutral_deg as f64
-            - 150.0 * current_error.unwrap_or(0.0);
+            - 450.0 * current_error.unwrap_or(0.0);
 
             //+ 0.05 * lane_offset_px;
 
