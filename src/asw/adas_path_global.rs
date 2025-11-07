@@ -6,7 +6,9 @@ use crate::asw::lib::adas_path_lib::{
     NodeKey, PathGraph, PathPlanningMode, PlannedPath, publish_global_path,
 };
 use crate::calibration::{AdasPathGlobalCalibration, LOCALIZATION_ACTIVE_SCENARIO};
-use crate::rte::rte_dto::{AdasLaneChangeState, DtoLocalizationState, DtoUltraSonicObstacle};
+use crate::rte::rte_dto::{
+    AdasLaneChangeState, DtoAdasSmoothedPath, DtoLocalizationState, DtoUltraSonicObstacle,
+};
 use crate::rte::rte_main::RteChannels;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -202,7 +204,19 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                         if changing {
                             lane_change_in_progress = true;
                         } else if lane_change_in_progress {
-                            lane_change_in_progress = false;
+                            let within_tolerance = latest_state
+                                .as_ref()
+                                .and_then(|state| {
+                                    lateral_error_to_smoothed_path(state, smoothed_arc.as_ref())
+                                })
+                                .map(|err| {
+                                    err.abs()
+                                        <= calib.lane_change_completion_tolerance_m as f64
+                                })
+                                .unwrap_or(true);
+                            if within_tolerance {
+                                lane_change_in_progress = false;
+                            }
                         }
                     }
                     Err(RecvError::Lagged(skipped)) => {
@@ -359,4 +373,31 @@ fn heading_from_plan(plan: &PlannedPath, idx: usize) -> Option<[f64; 2]> {
     } else {
         None
     }
+}
+
+fn lateral_error_to_smoothed_path(
+    state: &DtoLocalizationState,
+    path: &DtoAdasSmoothedPath,
+) -> Option<f64> {
+    let sample = path.samples_xy.first()?;
+    let heading_vec = if state.yaw_rad.is_finite() {
+        Some([state.yaw_rad.cos(), state.yaw_rad.sin()])
+    } else if let Some(motion_heading) = state.motion_heading_rad {
+        Some([motion_heading.cos(), motion_heading.sin()])
+    } else if let Some(next) = path.samples_xy.get(1) {
+        Some([
+            (next[0] - sample[0]) as f64,
+            (next[1] - sample[1]) as f64,
+        ])
+    } else {
+        None
+    }?;
+
+    let tangent = normalize_vec(heading_vec).unwrap_or([1.0, 0.0]);
+    let normal = [-tangent[1], tangent[0]];
+    let diff = [
+        sample[0] as f64 - state.position_map_xy[0],
+        sample[1] as f64 - state.position_map_xy[1],
+    ];
+    Some(diff[0] * normal[0] + diff[1] * normal[1])
 }
