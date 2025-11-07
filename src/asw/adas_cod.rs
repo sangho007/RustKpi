@@ -168,6 +168,9 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             target_deg
         };
 
+        println!("[ADAS-COD] total cmd : {}", limited_deg);
+
+
         // 명령 송신: DTO를 Arc로 감싸 브로드캐스트한다.
         let dto = DtoServoCtrl::new(calib.servo_channel_index, limited_deg);
         let _ = servo_tx.send(std::sync::Arc::new(dto));
