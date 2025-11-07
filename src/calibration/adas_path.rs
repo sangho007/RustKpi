@@ -79,7 +79,7 @@ impl Default for AdasPathGlobalCalibration {
             forced_max_lane_changes: 2,
             same_lane_neighbors: 3,
             cross_lane_neighbors: 4,
-            max_same_lane_distance_m: 0.2,
+            max_same_lane_distance_m: 0.8,
             max_lane_change_candidates: 8,
             nearest_search_horizon: 12,
             nearest_heading_cos_threshold: 0.0,
