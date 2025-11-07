@@ -16,7 +16,7 @@ impl Default for SlidingWindowCalibration {
     fn default() -> Self {
         Self {
             display_margin: 480,
-            search_margin: 150,
+            search_margin: 100,
             window_count: 15,
             minpix: 50,
             required_points: 5000,

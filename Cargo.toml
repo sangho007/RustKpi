@@ -27,4 +27,4 @@ lto = "fat"
 panic = "abort"
 
 [build]
-rustflags = ["-C", "target-cpu=native"]
+rustflags = ["-C", "target-cpu=cortex-a72"]
