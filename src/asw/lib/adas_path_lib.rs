@@ -685,9 +685,6 @@ impl PathGraph {
             }
             let mut candidates: Vec<(f64, f64, usize)> = Vec::new();
             for tgt in &target_pts {
-                if !tgt.can_change_lane {
-                    continue;
-                }
                 if tgt.y + (calib.forward_tolerance_m as f64) < src.y {
                     continue;
                 }
