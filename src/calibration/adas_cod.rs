@@ -131,7 +131,7 @@ impl Default for AdasLongitudinalCalibration {
             cruise_speed_percent: 30,
             crawl_speed_percent: 20,
             speed_target_mps: 0.2,
-            speed_pid_kp: 100.0,
+            speed_pid_kp: 50.0,
             speed_pid_ki: 0.0,
             speed_pid_kd: 0.0,
             speed_pid_integral_limit: 0.4,
