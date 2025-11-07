@@ -79,8 +79,8 @@ impl Default for AdasPathGlobalCalibration {
             obstacle_block_margin_m: 0.2,
             obstacle_block_timeout: Duration::from_millis(500),
             obstacle_block_heading_tolerance_deg: 10.0,
-            //global_planner: GlobalPathPlanner::HybridAStar,
-            global_planner: GlobalPathPlanner::AStar,
+            global_planner: GlobalPathPlanner::HybridAStar,
+            //global_planner: GlobalPathPlanner::AStar,
         }
     }
 }
