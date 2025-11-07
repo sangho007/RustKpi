@@ -225,6 +225,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let mut speed_pid_prev_error: Option<f64> = None;
     let mut alive_cnt: u32 = 0;
     let mut last_log = Instant::now();
+    let mut arrival_shutdown_triggered = false;
     let mut stop_request_since: Option<Instant> = None;
     let mut stop_release_since: Option<Instant> = None;
     let mut stop_engaged = false;
@@ -581,6 +582,20 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
         }
 
         // 설정된 로깅 주기에 따라 상태를 출력한다.
+        if stop_engaged && matches!(base_stop_reason, Some("arrival")) && !arrival_shutdown_triggered {
+            println!(
+                "[{}] Longitudinal: 목적지 도착 및 정차 완료, DC 모터 채널을 안전 종료합니다.",
+                id
+            );
+            if command.1 != 0 {
+                let dto = DtoDcMotorCtrl::new(0, 0, alive_cnt);
+                let _ = dc_tx.send(Arc::new(dto));
+                alive_cnt = alive_cnt.wrapping_add(1);
+            }
+            arrival_shutdown_triggered = true;
+            break;
+        }
+
         if last_log.elapsed() >= calib.log_interval {
             let distance_str = distance_cm
                 .map(|d| format!("{:.1}", d))
