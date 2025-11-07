@@ -88,15 +88,33 @@ impl PathGraph {
         blocked: &HashSet<NodeKey>,
         lane_change_penalty: f64,
         max_lane_changes: u32,
+        forbidden_lookahead_m: f64,
+        forbidden_penalty_scale: f64,
     ) -> Result<PlannedPath, String> {
         self.validate_plan_request(start, goal, blocked)?;
 
         match algorithm {
             GlobalPathPlanner::AStar => {
-                self.plan_path_astar(start, goal, blocked, lane_change_penalty, max_lane_changes)
+                self.plan_path_astar(
+                    start,
+                    goal,
+                    blocked,
+                    lane_change_penalty,
+                    max_lane_changes,
+                    forbidden_lookahead_m,
+                    forbidden_penalty_scale,
+                )
             }
             GlobalPathPlanner::HybridAStar => {
-                self.plan_path_hybrid(start, goal, blocked, lane_change_penalty, max_lane_changes)
+                self.plan_path_hybrid(
+                    start,
+                    goal,
+                    blocked,
+                    lane_change_penalty,
+                    max_lane_changes,
+                    forbidden_lookahead_m,
+                    forbidden_penalty_scale,
+                )
             }
         }
     }
@@ -254,6 +272,8 @@ impl PathGraph {
         blocked: &HashSet<NodeKey>,
         lane_change_penalty: f64,
         max_lane_changes: u32,
+        forbidden_lookahead_m: f64,
+        forbidden_penalty_scale: f64,
     ) -> Result<PlannedPath, String> {
         let mut open = BinaryHeap::new();
         let mut g_score: HashMap<(NodeKey, u32), f64> = HashMap::new();
@@ -298,12 +318,21 @@ impl PathGraph {
                     continue;
                 }
 
-                let step_cost = neighbor.distance
-                    + if neighbor.lane_change {
-                        lane_change_penalty
-                    } else {
-                        0.0
-                    };
+                let lane_penalty = if neighbor.lane_change {
+                    let mut penalty = lane_change_penalty;
+                    if forbidden_penalty_scale != 1.0
+                        && self.has_imminent_lane_change_block(
+                            node.key,
+                            forbidden_lookahead_m,
+                        )
+                    {
+                        penalty *= forbidden_penalty_scale;
+                    }
+                    penalty
+                } else {
+                    0.0
+                };
+                let step_cost = neighbor.distance + lane_penalty;
                 let tentative = node.cost + step_cost;
                 let neighbor_state = (neighbor.node, next_changes);
                 let entry = g_score.entry(neighbor_state).or_insert(f64::INFINITY);
@@ -406,6 +435,8 @@ impl PathGraph {
         blocked: &HashSet<NodeKey>,
         lane_change_penalty: f64,
         max_lane_changes: u32,
+        forbidden_lookahead_m: f64,
+        forbidden_penalty_scale: f64,
     ) -> Result<PlannedPath, String> {
         const HEADING_BINS: u16 = 36;
         const TURN_PENALTY_COEFF: f64 = 1.5;
@@ -510,7 +541,16 @@ impl PathGraph {
 
                 let curvature_penalty = heading_delta.abs() * TURN_PENALTY_COEFF;
                 let lane_penalty = if neighbor.lane_change {
-                    lane_change_penalty
+                    let mut penalty = lane_change_penalty;
+                    if forbidden_penalty_scale != 1.0
+                        && self.has_imminent_lane_change_block(
+                            node.key,
+                            forbidden_lookahead_m,
+                        )
+                    {
+                        penalty *= forbidden_penalty_scale;
+                    }
+                    penalty
                 } else {
                     0.0
                 };
@@ -565,6 +605,34 @@ impl PathGraph {
             LocalizationLane::Inner => &self.inner,
             LocalizationLane::Outer => &self.outer,
         }
+    }
+
+    fn has_imminent_lane_change_block(
+        &self,
+        node: NodeKey,
+        lookahead_m: f64,
+    ) -> bool {
+        if lookahead_m <= f64::EPSILON {
+            return false;
+        }
+        let lane_points = self.lane_points(node.lane);
+        let Some(current_wp) = lane_points.get(node.index) else {
+            return false;
+        };
+        let mut prev = current_wp.position();
+        let mut accumulated = 0.0;
+        for wp in lane_points.iter().skip(node.index + 1) {
+            let pos = wp.position();
+            accumulated += distance(prev, pos);
+            prev = pos;
+            if accumulated > lookahead_m {
+                break;
+            }
+            if !wp.can_change_lane {
+                return true;
+            }
+        }
+        false
     }
 
     fn build_same_lane_edges(&mut self, lane: LocalizationLane, calib: &AdasPathGlobalCalibration) {
@@ -974,6 +1042,8 @@ pub fn publish_global_path(
         blocked,
         lane_change_penalty,
         max_lane_changes,
+        calib.lane_change_forbidden_lookahead_m as f64,
+        calib.lane_change_forbidden_penalty_scale as f64,
     )?;
     if plan.waypoints.is_empty() {
         return Err("경로 결과가 비어 있습니다.".to_string());
