@@ -101,9 +101,9 @@ pub struct AdasPathLocalCalibration {
 impl Default for AdasPathLocalCalibration {
     fn default() -> Self {
         Self {
-            waypoint_window: 15,
+            waypoint_window: 12,
             smoothing_sample_count: 20,
-            smoothing_skip_head: 5,
+            smoothing_skip_head: 3,
             smoothing_min_samples: 6,
         }
     }
