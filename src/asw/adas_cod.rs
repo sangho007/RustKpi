@@ -40,7 +40,6 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     let mut last_log: Instant = Instant::now();
     let mut integral_error: f64 = 0.0;
     let mut prev_error: Option<f64> = None;
-    let mut raw_error: f64 = 0.0;
 
     loop {
         // 새 메시지가 도착했으면 최신으로 드레인
@@ -93,7 +92,6 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
 
         let lane_state = latest_path.as_deref().map(|path| path.lane_change_state);
 
-        let mut pid_output = 0.0;
         let mut current_error = None;
 
         if let (Some(state), Some(smoothed_path)) =
@@ -113,35 +111,14 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             }
         }
 
-        if let Some(error) = current_error {
-            integral_error += error * dt_sec;
-            if calib.pid_integral_limit > 0.0 {
-                let limit = calib.pid_integral_limit;
-                integral_error = integral_error.clamp(-limit, limit);
-            }
-            let derivative = if let Some(prev) = prev_error {
-                (error - prev) / dt_sec
-            } else {
-                0.0
-            };
-            prev_error = Some(error);
-            pid_output =
-                calib.pid_kp * error + calib.pid_ki * integral_error + calib.pid_kd * derivative;
-        } else {
-            // 데이터 부족 시 PID 상태를 리셋해 드리프트를 방지한다.
-            integral_error = 0.0;
-            prev_error = None;
-        }
-
         let lane_offset_px = latest_lane_angle
             .as_ref()
             .map(|lane| lane.lateral_offset)
             .unwrap_or(0.0);
 
-        //let base_cmd = calib.servo_neutral_deg as f64 - pid_output; -> good !!!!!
 
         let base_cmd = calib.servo_neutral_deg as f64
-            - 100.0 * current_error.unwrap_or(0.0);
+            - 50.0 * current_error.unwrap_or(0.0);
 
             //+ 0.05 * lane_offset_px;
 
@@ -166,6 +143,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             target_deg
         };
 
+        println!("[ADAS-COD] Lateral error : {}", current_error.unwrap_or(0.0));
         println!("[ADAS-COD] total cmd : {}", limited_deg);
 
 
