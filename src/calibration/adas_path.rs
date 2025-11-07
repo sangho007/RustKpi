@@ -75,7 +75,7 @@ impl Default for AdasPathGlobalCalibration {
             max_lane_change_candidates: 8,
             nearest_search_horizon: 12,
             nearest_heading_cos_threshold: 0.0,
-            lane_change_retry_cooldown: Duration::from_millis(3000),
+            lane_change_retry_cooldown: Duration::from_millis(500),
             obstacle_block_margin_m: 0.2,
             obstacle_block_timeout: Duration::from_millis(500),
             obstacle_block_heading_tolerance_deg: 10.0,
