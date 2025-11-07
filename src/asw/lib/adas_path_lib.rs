@@ -1191,14 +1191,11 @@ pub fn smooth_local_path(
     let tangent = heading;
     let normal = [tangent[1], -tangent[0]];
 
-    let mut s_values = Vec::with_capacity(waypoints.len() + 1);
-    let mut d_values = Vec::with_capacity(waypoints.len() + 1);
+    let mut s_values = Vec::with_capacity(waypoints.len());
+    let mut d_values = Vec::with_capacity(waypoints.len());
 
     let mut cumulative_s = 0.0;
     let mut prev = origin_xy;
-
-    s_values.push(0.0);
-    d_values.push(0.0);
 
     for wp in waypoints {
         let current = [wp.position_xy[0] as f64, wp.position_xy[1] as f64];
