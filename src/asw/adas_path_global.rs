@@ -117,8 +117,6 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                         if !obstacle.lane_change_requested && !obstacle.stop_requested {
                             blocked_nodes.clear();
                             blocked_cache.clear();
-                            lane_change_cooldown_until = None;
-                            obstacle_lane_change_cooldown_until = None;
                             continue;
                         }
 
