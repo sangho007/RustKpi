@@ -44,12 +44,12 @@ impl AdasLateralCalibration {
     fn baseline() -> Self {
         Self {
             w_lateral_error: 1.0,
-            w_lane_angle: 0.01,
+            w_lane_angle: 0.0,
             pid_kp: -1000.0,
             pid_ki: 0.0,
             pid_kd: 10.0,
             pid_integral_limit: 0.5,
-            pid_sample_index: 5,
+            pid_sample_index: 3,
             servo_neutral_deg: 90,
             servo_min_deg: 20,
             servo_max_deg: 160,
