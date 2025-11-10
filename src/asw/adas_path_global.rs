@@ -1,14 +1,16 @@
 //! ADAS 전역 경로 탐색 러너블(상태머신 기반 버전).
 //! 장애물·차선 변경 요청과 주기 타이머를 상태로 관리해 재계획 시점을 단순화한다.
 
-use crate::asw::lib::adas_path_lib::{NodeKey, PathGraph, PathPlanningMode, publish_global_path};
+use crate::asw::lib::adas_path_lib::{
+    NodeKey, PathGraph, PathPlanningMode, PlannedPath, publish_global_path,
+};
 use crate::calibration::{AdasPathGlobalCalibration, LOCALIZATION_ACTIVE_SCENARIO};
 use crate::rte::rte_dto::{
     AdasLaneChangeState, DtoAdasGlobalPath, DtoAdasSmoothedPath, DtoLocalizationState,
     DtoUltraSonicObstacle,
 };
 use crate::rte::rte_main::RteChannels;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::RecvError;
@@ -56,8 +58,14 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
     let mut smoothed_rx = channels.path.smoothed_tx.subscribe();
     let path_tx = channels.path.global_tx.clone();
 
+    let heading_cos_threshold = (calib.obstacle_block_heading_tolerance_deg as f64)
+        .to_radians()
+        .cos();
+
     let mut latest_state: Option<DtoLocalizationState> = None;
-    let blocked_cache: HashSet<NodeKey> = HashSet::new();
+    let mut latest_plan: Option<PlannedPath> = None;
+    let mut blocked_nodes: HashMap<NodeKey, Instant> = HashMap::new();
+    let mut blocked_cache: HashSet<NodeKey> = HashSet::new();
 
     let mut lateral_sm = LateralStateMachine::new();
     let mut lane_change_request_active = false;
@@ -79,6 +87,8 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                             newest = newer;
                         }
                         latest_state = Some(newest.as_ref().clone());
+                        let now = Instant::now();
+                        refresh_blocked_nodes(&mut blocked_nodes, &mut blocked_cache, now);
                     }
                     Err(RecvError::Lagged(skipped)) => {
                         eprintln!("[{}] Localization 업데이트 {}개 누락", id, skipped);
@@ -100,6 +110,9 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                         lane_change_sensor_active =
                             obstacle.distance_cm <= LANE_CHANGE_REQUEST_DISTANCE_CM;
 
+                        let now = Instant::now();
+                        refresh_blocked_nodes(&mut blocked_nodes, &mut blocked_cache, now);
+
                         if lane_change_sensor_active {
                             if !lane_change_request_active {
                                 println!(
@@ -108,8 +121,27 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                                 );
                             }
                             lane_change_request_active = true;
+
+                            if let (Some(plan), Some(state)) =
+                                (latest_plan.as_ref(), latest_state.as_ref())
+                            {
+                                let threshold =
+                                    (obstacle.distance_cm as f64 / 100.0f64).max(0.0)
+                                        + calib.obstacle_block_margin_m as f64;
+                                for node in compute_blocked_nodes(
+                                    plan,
+                                    state,
+                                    threshold,
+                                    heading_cos_threshold,
+                                ) {
+                                    blocked_nodes
+                                        .insert(node, now + calib.obstacle_block_timeout);
+                                }
+                                refresh_blocked_nodes(&mut blocked_nodes, &mut blocked_cache, now);
+                            }
+
                             if matches!(lateral_sm.state(), LateralDrivingState::LaneKeeping) {
-                                let _ = try_publish_path(
+                                if let Some(plan) = try_publish_path(
                                     id,
                                     &graph,
                                     &calib,
@@ -120,7 +152,9 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                                     &mut alive_cnt,
                                     &mut last_log,
                                     PathPlanningMode::ForceLaneChange,
-                                );
+                                ) {
+                                    latest_plan = Some(plan);
+                                }
                             }
                         } else if matches!(lateral_sm.state(), LateralDrivingState::LaneKeeping) {
                             if lane_change_request_active {
@@ -130,6 +164,8 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                                 );
                             }
                             lane_change_request_active = false;
+                            blocked_nodes.clear();
+                            blocked_cache.clear();
                         }
                     }
                     Err(RecvError::Lagged(skipped)) => {
@@ -164,6 +200,8 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                                     id
                                 );
                                 lane_change_request_active = false;
+                                blocked_nodes.clear();
+                                blocked_cache.clear();
                             }
                         }
                     }
@@ -178,12 +216,16 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
             }
             _ = tick.tick() => {
                 if matches!(lateral_sm.state(), LateralDrivingState::LaneKeeping) {
+                    let now = Instant::now();
+                    refresh_blocked_nodes(&mut blocked_nodes, &mut blocked_cache, now);
+
                     let mode = if lane_change_request_active {
                         PathPlanningMode::ForceLaneChange
                     } else {
                         PathPlanningMode::Normal
                     };
-                    let _ = try_publish_path(
+
+                    if let Some(plan) = try_publish_path(
                         id,
                         &graph,
                         &calib,
@@ -194,7 +236,9 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                         &mut alive_cnt,
                         &mut last_log,
                         mode,
-                    );
+                    ) {
+                        latest_plan = Some(plan);
+                    }
                 }
             }
         }
@@ -212,14 +256,16 @@ fn try_publish_path(
     alive_cnt: &mut u32,
     last_log: &mut Instant,
     mode: PathPlanningMode,
-) {
-    let Some(state) = state else {
-        return;
-    };
-    if let Err(err) = publish_global_path(
+) -> Option<PlannedPath> {
+    let state = state?;
+    match publish_global_path(
         id, graph, calib, path_tx, state, goal_key, blocked, alive_cnt, last_log, mode,
     ) {
-        eprintln!("[{}] 전역 경로 생성 실패({:?}): {}", id, mode, err);
+        Ok(plan) => Some(plan),
+        Err(err) => {
+            eprintln!("[{}] 전역 경로 생성 실패({:?}): {}", id, mode, err);
+            None
+        }
     }
 }
 
@@ -352,4 +398,95 @@ fn angle_difference(a: f64, b: f64) -> f64 {
         diff += 2.0 * PI;
     }
     diff
+}
+
+fn refresh_blocked_nodes(
+    blocked: &mut HashMap<NodeKey, Instant>,
+    cache: &mut HashSet<NodeKey>,
+    now: Instant,
+) {
+    blocked.retain(|_, &mut expires| expires > now);
+    cache.clear();
+    cache.extend(blocked.keys().copied());
+}
+
+fn compute_blocked_nodes(
+    plan: &PlannedPath,
+    state: &DtoLocalizationState,
+    threshold_m: f64,
+    heading_cos_threshold: f64,
+) -> Vec<NodeKey> {
+    if plan.waypoints.is_empty() {
+        return Vec::new();
+    }
+
+    let position = state.position_map_xy;
+    let mut nearest_idx = 0usize;
+    let mut best = f64::INFINITY;
+    for (idx, wp) in plan.waypoints.iter().enumerate() {
+        let dist = distance_2d(position, [wp.x, wp.y]);
+        if dist < best {
+            best = dist;
+            nearest_idx = idx;
+        }
+    }
+
+    let heading_unit = state
+        .motion_heading_rad
+        .map(|ang| [ang.cos(), ang.sin()])
+        .or_else(|| heading_from_plan(plan, nearest_idx))
+        .and_then(normalize_vec);
+
+    let mut blocked = Vec::new();
+    let mut accumulated = 0.0;
+    let mut prev = [plan.waypoints[nearest_idx].x, plan.waypoints[nearest_idx].y];
+
+    for wp in plan.waypoints.iter().skip(nearest_idx) {
+        if let Some(heading) = heading_unit {
+            let vec = [wp.x - position[0], wp.y - position[1]];
+            if let Some(dir) = normalize_vec(vec) {
+                let dot = dir[0] * heading[0] + dir[1] * heading[1];
+                if dot < heading_cos_threshold {
+                    continue;
+                }
+            }
+        }
+
+        if blocked.is_empty() {
+            blocked.push(NodeKey {
+                lane: wp.lane,
+                index: wp.index,
+            });
+            continue;
+        }
+        let current = [wp.x, wp.y];
+        accumulated += distance_2d(prev, current);
+        if accumulated <= threshold_m {
+            blocked.push(NodeKey {
+                lane: wp.lane,
+                index: wp.index,
+            });
+            prev = current;
+        } else {
+            break;
+        }
+    }
+
+    blocked
+}
+
+fn distance_2d(a: [f64; 2], b: [f64; 2]) -> f64 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
+}
+
+fn heading_from_plan(plan: &PlannedPath, idx: usize) -> Option<[f64; 2]> {
+    let current = plan.waypoints.get(idx)?;
+    if let Some(next) = plan.waypoints.get(idx + 1) {
+        Some([next.x - current.x, next.y - current.y])
+    } else if let Some(prev_idx) = idx.checked_sub(1) {
+        let prev = plan.waypoints.get(prev_idx)?;
+        Some([current.x - prev.x, current.y - prev.y])
+    } else {
+        None
+    }
 }
