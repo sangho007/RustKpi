@@ -123,10 +123,9 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                         if obstacle.lane_change_requested {
                             if lane_change_in_progress {
                                 println!(
-                                    "[{}] Lane change 진행 중 → 장애물 기반 재계획 건너뜀",
+                                    "[{}] Lane change 진행 중이지만 장애물 우선 → 즉시 재계획을 진행합니다.",
                                     id
                                 );
-                                continue;
                             }
                             if let (Some(plan), Some(state)) =
                                 (latest_plan.as_ref(), latest_state.as_ref())
@@ -147,42 +146,40 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                             }
 
                             if let Some(state) = latest_state.as_ref() {
-                                if lane_change_cooldown_until.map_or(true, |deadline| now >= deadline)
-                                {
-                                    match publish_global_path(
-                                        id,
-                                        &graph,
-                                        &calib,
-                                        &path_tx,
-                                        state,
-                                        goal_key,
-                                        &blocked_cache,
-                                        &mut alive_cnt,
-                                        &mut last_log,
-                                        PathPlanningMode::ForceLaneChange,
-                                    ) {
-                                        Ok(plan) => {
-                                            latest_plan = Some(plan);
-                                            lane_change_cooldown_until = None;
-                                        }
-                                        Err(err) => {
-                                            eprintln!(
-                                                "[{}] 전역 경로 생성 실패(ForceLaneChange): {}",
-                                                id, err
-                                            );
-                                            lane_change_cooldown_until =
-                                                Some(now + calib.lane_change_retry_cooldown);
-                                        }
-                                    }
-                                } else {
-                                    if let Some(deadline) = lane_change_cooldown_until {
+                                if let Some(deadline) = lane_change_cooldown_until {
+                                    if deadline > now {
                                         println!(
-                                            "[{}] 장애물 재계획 대기 중: 쿨다운 {:.0}ms 남음",
+                                            "[{}] 장애물 우선: 쿨다운 {:.0}ms 남았지만 무시하고 재계획합니다.",
                                             id,
                                             deadline
                                                 .saturating_duration_since(now)
                                                 .as_millis()
                                         );
+                                    }
+                                }
+                                match publish_global_path(
+                                    id,
+                                    &graph,
+                                    &calib,
+                                    &path_tx,
+                                    state,
+                                    goal_key,
+                                    &blocked_cache,
+                                    &mut alive_cnt,
+                                    &mut last_log,
+                                    PathPlanningMode::ForceLaneChange,
+                                ) {
+                                    Ok(plan) => {
+                                        latest_plan = Some(plan);
+                                        lane_change_cooldown_until = None;
+                                    }
+                                    Err(err) => {
+                                        eprintln!(
+                                            "[{}] 전역 경로 생성 실패(ForceLaneChange): {}",
+                                            id, err
+                                        );
+                                        lane_change_cooldown_until =
+                                            Some(now + calib.lane_change_retry_cooldown);
                                     }
                                 }
                             }
