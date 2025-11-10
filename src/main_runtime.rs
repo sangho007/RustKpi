@@ -3,6 +3,8 @@
 
 use crate::calibration::LOCALIZATION_ACTIVE_SCENARIO;
 use crate::rte::rte_dto::*;
+use crate::asw::lib::vs_trafficlight_lib::Pipeline as TlPipeline;
+use crate::calibration::traffic_light::TrafficLightCalibration;
 use crate::rte::rte_main::RteChannels;
 use crate::util::preview_runtime::{self, FramePacket, FramePayload, PreviewEvent, PreviewMessage};
 use opencv::core::{CV_8UC3, Mat, Point, Scalar};
@@ -109,6 +111,9 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
 
+    // 신호등 디버그 프리뷰용 파이프라인을 준비한다.
+    let mut tl_pipeline = TlPipeline::new(TrafficLightCalibration::default());
+
     // GUI와 ASW 데이터를 중계하는 메인 이벤트 루프다.
     'main_loop: loop {
         select! {
@@ -133,14 +138,36 @@ pub async fn run(channels: RteChannels) -> opencv::Result<()> {
                     }
 
                     if let Some(tx) = preview_tx.as_ref() {
-                        let payload = FramePacket {
-                            width: newest.width,
-                            height: newest.height,
-                            stride: newest.stride,
-                            format: newest.color_format,
-                            payload: FramePayload::Camera(newest.buffer.clone()),
-                        };
-                        let _ = tx.send(PreviewMessage::Raw(payload));
+                        // 원본 대신 신호등 클러스터링 디버그 이미지를 320x240으로 표시
+                        match newest.as_bgr_mat().and_then(|bgr| tl_pipeline.debug_visualize_bgr(&bgr)) {
+                            Ok(mat) => {
+                                match mat.step1(0) {
+                                    Ok(stride) => {
+                                        let payload = FramePacket {
+                                            width: mat.cols() as u32,
+                                            height: mat.rows() as u32,
+                                            stride: stride as usize,
+                                            format: ColorFormat::Bgr,
+                                            payload: FramePayload::Mat(Arc::new(mat)),
+                                        };
+                                        let _ = tx.send(PreviewMessage::Raw(payload));
+                                    }
+                                    Err(err) => runtime_eprintln!("[GUI] TL debug stride error: {}", err),
+                                }
+                            }
+                            Err(err) => {
+                                // 실패 시 원본을 그대로 표시
+                                let payload = FramePacket {
+                                    width: newest.width,
+                                    height: newest.height,
+                                    stride: newest.stride,
+                                    format: newest.color_format,
+                                    payload: FramePayload::Camera(newest.buffer.clone()),
+                                };
+                                runtime_eprintln!("[GUI] TL debug viz failed: {} (fallback to raw)", err);
+                                let _ = tx.send(PreviewMessage::Raw(payload));
+                            }
+                        }
                     }
                 }
                 Err(RecvError::Lagged(n)) => {

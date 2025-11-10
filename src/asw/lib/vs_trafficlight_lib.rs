@@ -10,6 +10,7 @@ use opencv::{
     imgproc,
     prelude::*,
 };
+use opencv::core::Vector;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -237,6 +238,68 @@ impl Pipeline {
 
         // 가장 큰 클러스터의 크기를 찾습니다.
         cluster_counts.into_values().max().unwrap_or(0)
+    }
+
+    /// HSV/BGR 입력을 받아 다운스케일링 후 색상 마스크를 색상 채널로 합성한 디버그 이미지를 생성한다.
+    /// 반환 이미지는 BGR 320x240 크기다.
+    pub fn debug_visualize_bgr(&self, bgr_input: &Mat) -> Result<Mat> {
+        // 입력을 HSV로 변환
+        let hsv = {
+            let mut hsv = Mat::default();
+            imgproc::cvt_color(
+                bgr_input,
+                &mut hsv,
+                imgproc::COLOR_BGR2HSV,
+                0,
+                ALGO_HINT_DEFAULT,
+            )?;
+            hsv
+        };
+
+        // 다운스케일 (원본이 작으면 그대로 사용)
+        let orig_w = hsv.cols().max(1);
+        let orig_h = hsv.rows().max(1);
+        let target_w = 320;
+        let target_h = 240;
+        let mut hsv_small = Mat::default();
+        if orig_w <= target_w || orig_h <= target_h {
+            hsv_small = hsv;
+        } else {
+            imgproc::resize(
+                &hsv,
+                &mut hsv_small,
+                Size::new(target_w, target_h),
+                0.0,
+                0.0,
+                imgproc::INTER_AREA,
+            )?;
+        }
+
+        // 마스크 생성 + 노이즈 제거
+        let red_mask = self.create_mask(&hsv_small, self.red_threshold)?;
+        let yellow_mask = self.create_mask(&hsv_small, self.yellow_threshold)?;
+        let green_mask = self.create_mask(&hsv_small, self.green_threshold)?;
+
+        let red = self.apply_morphology(&red_mask).unwrap_or(red_mask);
+        let yellow = self
+            .apply_morphology(&yellow_mask)
+            .unwrap_or(yellow_mask);
+        let green = self.apply_morphology(&green_mask).unwrap_or(green_mask);
+
+        // 채널 합성: B=0, G=max(green, yellow), R=max(red, yellow)
+        let zeros = Mat::zeros(hsv_small.rows(), hsv_small.cols(), red.typ())?.to_mat()?;
+        let mut g_chan = Mat::default();
+        core::max(&green, &yellow, &mut g_chan)?;
+        let mut r_chan = Mat::default();
+        core::max(&red, &yellow, &mut r_chan)?;
+        let mut bgr = Mat::default();
+        let mut mv = Vector::<Mat>::new();
+        mv.push(zeros);
+        mv.push(g_chan);
+        mv.push(r_chan);
+        core::merge(&mv, &mut bgr)?;
+
+        Ok(bgr)
     }
 }
 
