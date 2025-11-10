@@ -68,7 +68,7 @@ pub struct AdasPathGlobalCalibration {
 impl Default for AdasPathGlobalCalibration {
     fn default() -> Self {
         Self {
-            replanning_period: Duration::from_secs(2),
+            replanning_period: Duration::from_millis(500),
             vehicle_width_m: 0.15,
             vehicle_length_m: 0.20,
             max_lane_change_offset_m: 1.0,
