@@ -70,7 +70,7 @@ pub struct AdasPathGlobalCalibration {
 impl Default for AdasPathGlobalCalibration {
     fn default() -> Self {
         Self {
-            replanning_period: Duration::from_millis(2000),
+            replanning_period: Duration::from_millis(10000),
             vehicle_width_m: 0.15,
             vehicle_length_m: 0.20,
             max_lane_change_offset_m: 1.0,
@@ -86,7 +86,7 @@ impl Default for AdasPathGlobalCalibration {
             nearest_search_horizon: 12,
             nearest_heading_cos_threshold: 0.0,
             lane_change_retry_cooldown: Duration::from_millis(5000),
-            obstacle_lane_change_cooldown: Duration::from_millis(1000),
+            obstacle_lane_change_cooldown: Duration::from_millis(5000),
             obstacle_block_margin_m: 1.0,
             obstacle_block_timeout: Duration::from_millis(5000),
             obstacle_block_heading_tolerance_deg: 10.0,
