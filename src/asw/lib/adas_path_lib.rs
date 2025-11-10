@@ -643,6 +643,9 @@ impl PathGraph {
                 if current.index == other.index {
                     continue;
                 }
+                if other.y + (calib.forward_tolerance_m as f64) < current.y {
+                    continue;
+                }
                 let dist = distance(current.position(), other.position());
                 if dist > calib.max_same_lane_distance_m as f64 {
                     continue;

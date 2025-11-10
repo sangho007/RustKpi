@@ -193,13 +193,21 @@ pub const LOCALIZATION_ARRIVAL_THRESHOLD_M: f64 = 0.10; // 10cm
 /// 현재 테스트 시나리오 기본값.
 pub const LOCALIZATION_ACTIVE_SCENARIO: LocalizationScenarioSelection =
     LocalizationScenarioSelection {
-        map: LocalizationMapId::Crossroad,
-        start: CROSSROAD_STARTS[1],
-        destination: CROSSROAD_DESTINATIONS[1],
+        // 1자 맵
+        map: LocalizationMapId::OneLane,
+        start: ONE_LANE_STARTS[0],
+        destination: ONE_LANE_DESTINATIONS[0],
 
-        //map: LocalizationMapId::OneLane,
-        //start: ONE_LANE_STARTS[0],
-        //destination: ONE_LANE_DESTINATIONS[0],
+        // S자 맵
+        //map: LocalizationMapId::SLane,
+        //start: SLANE_STARTS[0],
+        //destination: SLANE_DESTINATIONS[0],
+
+        // 사거리 맵
+        //map: LocalizationMapId::Crossroad,
+        //start: CROSSROAD_STARTS[1],
+        //destination: CROSSROAD_DESTINATIONS[1],
+
     };
 
 /// ADAS Localization에서 선택 가능한 지도 프리셋.
