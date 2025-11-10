@@ -12,7 +12,7 @@ use pwm_pca9685::{Address, Channel, Pca9685};
 use tokio::{
     select, signal,
     sync::{broadcast::error::TryRecvError, watch},
-    time::{interval, Duration},
+    time::{Duration, interval},
 };
 
 /// PCA9685 기반 액추에이터 제어 태스크를 실행한다.

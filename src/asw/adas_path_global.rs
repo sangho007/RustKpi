@@ -64,7 +64,8 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
     let mut latest_plan: Option<PlannedPath> = None;
     let mut blocked_nodes: HashMap<NodeKey, Instant> = HashMap::new();
     let mut blocked_cache: HashSet<NodeKey> = HashSet::new();
-    let mut lane_change_requested = false;
+    let mut lane_change_request_active = false;
+    let mut obstacle_signal_active = false;
     let mut obstacle_lane_change_cooldown_until: Option<Instant> = None;
     let mut lane_change_cooldown_until: Option<Instant> = None;
     let mut lane_change_in_progress = false;
@@ -107,16 +108,35 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                         let now = Instant::now();
                         refresh_blocked_nodes(&mut blocked_nodes, &mut blocked_cache, now);
 
-                        lane_change_requested = obstacle.lane_change_requested;
-                        if obstacle.lane_change_requested || obstacle.stop_requested {
+                        obstacle_signal_active =
+                            obstacle.lane_change_requested || obstacle.stop_requested;
+                        if obstacle.lane_change_requested {
+                            lane_change_request_active = true;
+                        }
+                        if obstacle_signal_active {
                             println!(
                                 "[{}] 장애물 재계획 트리거: lane_change_req={} stop_req={} dist={:.2}cm",
                                 id, obstacle.lane_change_requested, obstacle.stop_requested, obstacle.distance_cm
                             );
-                        }
-                        if !obstacle.lane_change_requested && !obstacle.stop_requested {
-                            blocked_nodes.clear();
-                            blocked_cache.clear();
+                        } else {
+                            if lane_change_request_active {
+                                if lane_change_in_progress {
+                                    println!(
+                                        "[{}] 장애물 신호 해제: 차선 변경 완료 전이라 요청을 유지합니다.",
+                                        id
+                                    );
+                                } else {
+                                    release_lane_change_request_if_clear(
+                                        &mut lane_change_request_active,
+                                        obstacle_signal_active,
+                                        &mut blocked_nodes,
+                                        &mut blocked_cache,
+                                    );
+                                }
+                            } else {
+                                blocked_nodes.clear();
+                                blocked_cache.clear();
+                            }
                             continue;
                         }
 
@@ -220,6 +240,12 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                             if !lane_change_alignment_ready {
                                 lane_change_alignment_ready = true;
                                 lane_change_in_progress = false;
+                                release_lane_change_request_if_clear(
+                                    &mut lane_change_request_active,
+                                    obstacle_signal_active,
+                                    &mut blocked_nodes,
+                                    &mut blocked_cache,
+                                );
                                 continue;
                             }
                             if matches!(
@@ -227,6 +253,12 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                                 AdasLaneChangeState::InnerCruise | AdasLaneChangeState::OuterCruise
                             ) {
                                 lane_change_in_progress = false;
+                                release_lane_change_request_if_clear(
+                                    &mut lane_change_request_active,
+                                    obstacle_signal_active,
+                                    &mut blocked_nodes,
+                                    &mut blocked_cache,
+                                );
                                 continue;
                             }
                             let within_tolerance = latest_state
@@ -242,6 +274,12 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                                 .unwrap_or(true);
                             if within_tolerance {
                                 lane_change_in_progress = false;
+                                release_lane_change_request_if_clear(
+                                    &mut lane_change_request_active,
+                                    obstacle_signal_active,
+                                    &mut blocked_nodes,
+                                    &mut blocked_cache,
+                                );
                             }
                         }
                     }
@@ -261,7 +299,7 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
 
                     let obstacle_cooldown_active = obstacle_lane_change_cooldown_until
                         .map_or(false, |deadline| now < deadline);
-                    let force_allowed = lane_change_requested
+                    let force_allowed = lane_change_request_active
                         && !obstacle_cooldown_active
                         && lane_change_cooldown_until.map_or(true, |deadline| now >= deadline);
                     let mode = if force_allowed {
@@ -312,6 +350,19 @@ fn refresh_blocked_nodes(
     blocked.retain(|_, &mut expires| expires > now);
     cache.clear();
     cache.extend(blocked.keys().copied());
+}
+
+fn release_lane_change_request_if_clear(
+    request_active: &mut bool,
+    obstacle_signal_active: bool,
+    blocked_nodes: &mut HashMap<NodeKey, Instant>,
+    blocked_cache: &mut HashSet<NodeKey>,
+) {
+    if *request_active && !obstacle_signal_active {
+        *request_active = false;
+        blocked_nodes.clear();
+        blocked_cache.clear();
+    }
 }
 
 fn compute_blocked_nodes(
@@ -417,12 +468,10 @@ fn lane_alignment_error(
         state.motion_heading_rad?
     };
 
-    let path_vec = path.samples_xy.get(1).map(|next| {
-        [
-            (next[0] - sample[0]) as f64,
-            (next[1] - sample[1]) as f64,
-        ]
-    });
+    let path_vec = path
+        .samples_xy
+        .get(1)
+        .map(|next| [(next[0] - sample[0]) as f64, (next[1] - sample[1]) as f64]);
 
     let tangent = path_vec
         .and_then(normalize_vec)

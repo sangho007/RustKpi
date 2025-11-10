@@ -14,9 +14,9 @@ const BASE_HEIGHT: f32 = 480.0;
 /// - (370, 320)  : 우상(top-right)
 /// - (540, 413)  : 우하(bottom-right)
 const BASE_ROI: [(i32, i32); 4] = [
-    (0, 480), // 좌하 (bottom-left)
-    (0, 0), // 좌상 (top-left)
-    (640, 0), // 우상 (top-right)
+    (0, 480),   // 좌하 (bottom-left)
+    (0, 0),     // 좌상 (top-left)
+    (640, 0),   // 우상 (top-right)
     (640, 480), // 우하 (bottom-right)
 ];
 

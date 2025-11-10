@@ -4,13 +4,13 @@
 
 use crate::calibration::traffic_light::{TrafficLightCalibration, TrafficLightColorThreshold};
 use dbscan::*;
+use opencv::core::Vector;
 use opencv::{
     Result,
     core::{self, AlgorithmHint::ALGO_HINT_DEFAULT, Mat, Point, Scalar, Size}, // Size 추가
     imgproc,
     prelude::*,
 };
-use opencv::core::Vector;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -85,7 +85,10 @@ impl Pipeline {
         let target_w = 320;
         let target_h = 240;
         let mut hsv_small = Mat::default();
-        let (scale_x, scale_y) = (target_w as f64 / orig_w as f64, target_h as f64 / orig_h as f64);
+        let (scale_x, scale_y) = (
+            target_w as f64 / orig_w as f64,
+            target_h as f64 / orig_h as f64,
+        );
         let mut scale = scale_x.min(scale_y);
         if orig_w <= target_w || orig_h <= target_h {
             // 원본이 더 작거나 같은 경우에는 업스케일하지 않고 원본을 그대로 사용
@@ -291,9 +294,7 @@ impl Pipeline {
         let green_mask = self.create_mask(&hsv_small, self.green_threshold)?;
 
         let red = self.apply_morphology(&red_mask).unwrap_or(red_mask);
-        let yellow = self
-            .apply_morphology(&yellow_mask)
-            .unwrap_or(yellow_mask);
+        let yellow = self.apply_morphology(&yellow_mask).unwrap_or(yellow_mask);
         let green = self.apply_morphology(&green_mask).unwrap_or(green_mask);
 
         // 채널 합성: B=0, G=max(green, yellow), R=max(red, yellow)

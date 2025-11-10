@@ -1,10 +1,10 @@
 //! 메인 런타임: RTE 채널에서 데이터를 수집해 프리뷰 GUI로 전달한다.
 //! 또한 IMU/초음파 로그를 출력하고 종료 시그널을 관리한다.
 
-use crate::calibration::LOCALIZATION_ACTIVE_SCENARIO;
-use crate::rte::rte_dto::*;
 use crate::asw::lib::vs_trafficlight_lib::Pipeline as TlPipeline;
+use crate::calibration::LOCALIZATION_ACTIVE_SCENARIO;
 use crate::calibration::traffic_light::TrafficLightCalibration;
+use crate::rte::rte_dto::*;
 use crate::rte::rte_main::RteChannels;
 use crate::util::preview_runtime::{self, FramePacket, FramePayload, PreviewEvent, PreviewMessage};
 use opencv::core::{CV_8UC3, Mat, Point, Scalar};

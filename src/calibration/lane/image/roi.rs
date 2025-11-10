@@ -26,12 +26,7 @@ impl RoiCalibration {
 impl Default for RoiCalibration {
     fn default() -> Self {
         Self {
-            vertices:[
-            (0, 240),
-            (177, 100),
-            (480, 100),
-            (640, 240),
-            ],
+            vertices: [(0, 240), (177, 100), (480, 100), (640, 240)],
         }
     }
 }

@@ -38,12 +38,7 @@ impl PerspectiveCalibration {
 impl Default for PerspectiveCalibration {
     fn default() -> Self {
         Self {
-            source: [
-                (0.0, 240.0),
-                (177.0, 150.0),
-                (480.0, 150.0),
-                (640.0, 240.0),
-            ],
+            source: [(0.0, 240.0), (177.0, 150.0), (480.0, 150.0), (640.0, 240.0)],
             destination: [(0.0, 480.0), (0.0, 0.0), (640.0, 0.0), (640.0, 480.0)],
         }
     }

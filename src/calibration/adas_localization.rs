@@ -197,7 +197,6 @@ pub const LOCALIZATION_ACTIVE_SCENARIO: LocalizationScenarioSelection =
         map: LocalizationMapId::OneLane,
         start: ONE_LANE_STARTS[0],
         destination: ONE_LANE_DESTINATIONS[0],
-
         // S자 맵
         //map: LocalizationMapId::SLane,
         //start: SLANE_STARTS[0],
@@ -207,7 +206,6 @@ pub const LOCALIZATION_ACTIVE_SCENARIO: LocalizationScenarioSelection =
         //map: LocalizationMapId::Crossroad,
         //start: CROSSROAD_STARTS[1],
         //destination: CROSSROAD_DESTINATIONS[3],
-
     };
 
 /// ADAS Localization에서 선택 가능한 지도 프리셋.

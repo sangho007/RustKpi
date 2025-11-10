@@ -94,28 +94,24 @@ impl PathGraph {
         self.validate_plan_request(start, goal, blocked)?;
 
         match algorithm {
-            GlobalPathPlanner::AStar => {
-                self.plan_path_astar(
-                    start,
-                    goal,
-                    blocked,
-                    lane_change_penalty,
-                    max_lane_changes,
-                    forbidden_lookahead_m,
-                    forbidden_penalty_scale,
-                )
-            }
-            GlobalPathPlanner::HybridAStar => {
-                self.plan_path_hybrid(
-                    start,
-                    goal,
-                    blocked,
-                    lane_change_penalty,
-                    max_lane_changes,
-                    forbidden_lookahead_m,
-                    forbidden_penalty_scale,
-                )
-            }
+            GlobalPathPlanner::AStar => self.plan_path_astar(
+                start,
+                goal,
+                blocked,
+                lane_change_penalty,
+                max_lane_changes,
+                forbidden_lookahead_m,
+                forbidden_penalty_scale,
+            ),
+            GlobalPathPlanner::HybridAStar => self.plan_path_hybrid(
+                start,
+                goal,
+                blocked,
+                lane_change_penalty,
+                max_lane_changes,
+                forbidden_lookahead_m,
+                forbidden_penalty_scale,
+            ),
         }
     }
 
@@ -321,10 +317,7 @@ impl PathGraph {
                 let lane_penalty = if neighbor.lane_change {
                     let mut penalty = lane_change_penalty;
                     if forbidden_penalty_scale != 1.0
-                        && self.has_imminent_lane_change_block(
-                            node.key,
-                            forbidden_lookahead_m,
-                        )
+                        && self.has_imminent_lane_change_block(node.key, forbidden_lookahead_m)
                     {
                         penalty *= forbidden_penalty_scale;
                     }
@@ -543,10 +536,7 @@ impl PathGraph {
                 let lane_penalty = if neighbor.lane_change {
                     let mut penalty = lane_change_penalty;
                     if forbidden_penalty_scale != 1.0
-                        && self.has_imminent_lane_change_block(
-                            node.key,
-                            forbidden_lookahead_m,
-                        )
+                        && self.has_imminent_lane_change_block(node.key, forbidden_lookahead_m)
                     {
                         penalty *= forbidden_penalty_scale;
                     }
@@ -607,11 +597,7 @@ impl PathGraph {
         }
     }
 
-    fn has_imminent_lane_change_block(
-        &self,
-        node: NodeKey,
-        lookahead_m: f64,
-    ) -> bool {
+    fn has_imminent_lane_change_block(&self, node: NodeKey, lookahead_m: f64) -> bool {
         if lookahead_m <= f64::EPSILON {
             return false;
         }
@@ -1051,14 +1037,21 @@ pub fn publish_global_path(
             relaxed.forward_tolerance_m = 1_000.0;
             // 동일 차선 후보 수/반경 확대
             relaxed.same_lane_neighbors = relaxed.same_lane_neighbors.saturating_add(2).min(12);
-            relaxed.max_same_lane_distance_m = (relaxed.max_same_lane_distance_m * 2.0).clamp(0.1, 2.0);
+            relaxed.max_same_lane_distance_m =
+                (relaxed.max_same_lane_distance_m * 2.0).clamp(0.1, 2.0);
             // 차선 변경 후보도 넉넉히
             relaxed.cross_lane_neighbors = relaxed.cross_lane_neighbors.saturating_add(2).min(12);
-            relaxed.nearest_search_horizon = relaxed.nearest_search_horizon.saturating_add(8).min(64);
+            relaxed.nearest_search_horizon =
+                relaxed.nearest_search_horizon.saturating_add(8).min(64);
 
             let relaxed_graph = match PathGraph::load(graph.map_id(), &relaxed) {
                 Ok(g) => g,
-                Err(e) => return Err(format!("완화 재시도: 그래프 로드 실패: {} (원인={})", e, e1)),
+                Err(e) => {
+                    return Err(format!(
+                        "완화 재시도: 그래프 로드 실패: {} (원인={})",
+                        e, e1
+                    ));
+                }
             };
             let start_relaxed = relaxed_graph
                 .nearest_waypoint(
@@ -1068,7 +1061,12 @@ pub fn publish_global_path(
                     relaxed.nearest_search_horizon,
                     relaxed.nearest_heading_cos_threshold,
                 )
-                .ok_or_else(|| format!("완화 재시도: lane={:?}에서 근접 waypoint 탐색 실패", start_lane))?;
+                .ok_or_else(|| {
+                    format!(
+                        "완화 재시도: lane={:?}에서 근접 waypoint 탐색 실패",
+                        start_lane
+                    )
+                })?;
 
             match relaxed_graph.plan_path(
                 relaxed.global_planner,

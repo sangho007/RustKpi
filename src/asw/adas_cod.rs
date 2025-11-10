@@ -40,7 +40,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     let mut last_log: Instant = Instant::now();
     let mut integral_error: f64 = 0.0;
     let mut prev_error: Option<f64> = None;
-    let mut pid_output:f64 = 0.0;
+    let mut pid_output: f64 = 0.0;
 
     loop {
         // 새 메시지가 도착했으면 최신으로 드레인
@@ -127,8 +127,8 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
         } else {
             0.0
         };
-        let mut control_error = lateral_error
-            .map(|err| calib.w_lateral_error * err + lane_angle_term);
+        let mut control_error =
+            lateral_error.map(|err| calib.w_lateral_error * err + lane_angle_term);
         if control_error.is_none() && lane_angle_term.abs() > f64::EPSILON {
             control_error = Some(lane_angle_term);
         }
@@ -157,7 +157,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
 
         //let base_cmd = calib.servo_neutral_deg as f64
         //    - 450.0 * control_error.unwrap_or(0.0);
-            //+ 0.05 * lane_offset_px;
+        //+ 0.05 * lane_offset_px;
 
         let target_deg = base_cmd
             .round()
@@ -182,7 +182,6 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
 
         //println!("[ADAS-COD] Lateral error : {:?}", lateral_error);
         //println!("[ADAS-COD] total cmd : {}", limited_deg);
-
 
         // 명령 송신: DTO를 Arc로 감싸 브로드캐스트한다.
         let dto = DtoServoCtrl::new(calib.servo_channel_index, limited_deg);
@@ -591,8 +590,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
         let feedforward_percent = if target_speed_mps <= 0.0 || calib.speed_target_mps <= 0.0 {
             0.0
         } else {
-            (target_speed_mps / calib.speed_target_mps)
-                .clamp(0.0, 1.0)
+            (target_speed_mps / calib.speed_target_mps).clamp(0.0, 1.0)
                 * calib.cruise_speed_percent as f64
         };
 
@@ -642,7 +640,10 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
         }
 
         // 설정된 로깅 주기에 따라 상태를 출력한다.
-        if stop_engaged && matches!(base_stop_reason, Some("arrival")) && !arrival_shutdown_triggered {
+        if stop_engaged
+            && matches!(base_stop_reason, Some("arrival"))
+            && !arrival_shutdown_triggered
+        {
             println!(
                 "[{}] Longitudinal: 목적지 도착 및 정차 완료, DC 모터 채널을 안전 종료합니다.",
                 id
