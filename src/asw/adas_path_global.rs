@@ -1,30 +1,27 @@
-//! ADAS 전역 경로 탐색 러너블.
-//! Localization 결과를 기반으로 출발 waypoint를 결정하고
-//! A* 구현을 포팅한 라이브러리(`adas_path_lib`)를 호출해 목적지까지의 경로를 생성한다.
+//! ADAS 전역 경로 탐색 러너블(상태머신 기반 버전).
+//! 장애물·차선 변경 요청과 주기 타이머를 상태로 관리해 재계획 시점을 단순화한다.
 
-use crate::asw::lib::adas_path_lib::{
-    NodeKey, PathGraph, PathPlanningMode, PlannedPath, publish_global_path,
-};
+use crate::asw::lib::adas_path_lib::{NodeKey, PathGraph, PathPlanningMode, publish_global_path};
 use crate::calibration::{AdasPathGlobalCalibration, LOCALIZATION_ACTIVE_SCENARIO};
 use crate::rte::rte_dto::{
-    AdasLaneChangeState, DtoAdasSmoothedPath, DtoLocalizationState, DtoUltraSonicObstacle,
+    AdasLaneChangeState, DtoAdasGlobalPath, DtoAdasSmoothedPath, DtoLocalizationState,
+    DtoUltraSonicObstacle,
 };
 use crate::rte::rte_main::RteChannels;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::f64::consts::PI;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::{self, MissedTickBehavior};
+
+const LANE_CHANGE_HEADING_TOL_RAD: f64 = 15.0_f64 * PI / 180.0;
+const LANE_CHANGE_LATERAL_TOL_M: f64 = 0.03;
+const LANE_CHANGE_SETTLE_DURATION: Duration = Duration::from_secs(2);
+const LANE_CHANGE_REQUEST_DISTANCE_CM: f32 = 55.0;
 
 pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) {
     let calib = AdasPathGlobalCalibration::default();
     let scenario = LOCALIZATION_ACTIVE_SCENARIO;
-
-    let heading_cos_threshold = (calib.obstacle_block_heading_tolerance_deg as f64)
-        .to_radians()
-        .cos();
-    let lane_change_heading_tol_rad =
-        (calib.lane_change_completion_heading_tolerance_deg as f64).to_radians();
 
     let graph = match PathGraph::load(scenario.map, &calib) {
         Ok(graph) => graph,
@@ -34,7 +31,6 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
         }
     };
 
-    // 목적지 waypoint 유효성 확인.
     let goal_key = NodeKey {
         lane: scenario.destination.lane,
         index: scenario.destination.waypoint_index,
@@ -61,15 +57,11 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
     let path_tx = channels.path.global_tx.clone();
 
     let mut latest_state: Option<DtoLocalizationState> = None;
-    let mut latest_plan: Option<PlannedPath> = None;
-    let mut blocked_nodes: HashMap<NodeKey, Instant> = HashMap::new();
-    let mut blocked_cache: HashSet<NodeKey> = HashSet::new();
+    let blocked_cache: HashSet<NodeKey> = HashSet::new();
+
+    let mut lateral_sm = LateralStateMachine::new();
     let mut lane_change_request_active = false;
-    let mut obstacle_signal_active = false;
-    let mut obstacle_lane_change_cooldown_until: Option<Instant> = None;
-    let mut lane_change_cooldown_until: Option<Instant> = None;
-    let mut lane_change_in_progress = false;
-    let mut lane_change_alignment_ready = false;
+    let mut lane_change_sensor_active = false;
 
     let mut tick = time::interval(calib.replanning_period);
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -105,116 +97,39 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                             newest = newer;
                         }
                         let obstacle: DtoUltraSonicObstacle = newest.as_ref().clone();
-                        let now = Instant::now();
-                        refresh_blocked_nodes(&mut blocked_nodes, &mut blocked_cache, now);
+                        lane_change_sensor_active =
+                            obstacle.distance_cm <= LANE_CHANGE_REQUEST_DISTANCE_CM;
 
-                        obstacle_signal_active =
-                            obstacle.lane_change_requested || obstacle.stop_requested;
-                        if obstacle.lane_change_requested {
-                            lane_change_request_active = true;
-                        }
-                        if obstacle_signal_active {
-                            println!(
-                                "[{}] 장애물 재계획 트리거: lane_change_req={} stop_req={} dist={:.2}cm",
-                                id, obstacle.lane_change_requested, obstacle.stop_requested, obstacle.distance_cm
-                            );
-                        } else {
-                            if lane_change_request_active {
-                                if lane_change_in_progress {
-                                    println!(
-                                        "[{}] 장애물 신호 해제: 차선 변경 완료 전이라 요청을 유지합니다.",
-                                        id
-                                    );
-                                } else {
-                                    release_lane_change_request_if_clear(
-                                        &mut lane_change_request_active,
-                                        obstacle_signal_active,
-                                        &mut blocked_nodes,
-                                        &mut blocked_cache,
-                                    );
-                                }
-                            } else {
-                                blocked_nodes.clear();
-                                blocked_cache.clear();
-                            }
-                            continue;
-                        }
-
-                        if obstacle.lane_change_requested {
-                            if lane_change_in_progress {
+                        if lane_change_sensor_active {
+                            if !lane_change_request_active {
                                 println!(
-                                    "[{}] Lane change 진행 중이지만 장애물 우선 → 즉시 재계획을 진행합니다.",
-                                    id
+                                    "[{}] 장애물 감지: {:.1}cm (lane-change 요청 시작)",
+                                    id, obstacle.distance_cm
                                 );
                             }
-                            if let Some(deadline) = obstacle_lane_change_cooldown_until {
-                                if deadline > now {
-                                    println!(
-                                        "[{}] 장애물 차선 변경 쿨다운 진행 중: {:.0}ms 남음",
-                                        id,
-                                        deadline.saturating_duration_since(now).as_millis()
-                                    );
-                                    continue;
-                                }
-                            }
-                            if let (Some(plan), Some(state)) =
-                                (latest_plan.as_ref(), latest_state.as_ref())
-                            {
-                                let threshold =
-                                    (obstacle.distance_cm as f64 / 100.0f64).max(0.0)
-                                        + calib.obstacle_block_margin_m as f64;
-                                for node in compute_blocked_nodes(
-                                    plan,
-                                    state,
-                                    threshold,
-                                    heading_cos_threshold,
-                                ) {
-                                    blocked_nodes
-                                        .insert(node, now + calib.obstacle_block_timeout);
-                                }
-                                refresh_blocked_nodes(&mut blocked_nodes, &mut blocked_cache, now);
-                            }
-
-                            if let Some(state) = latest_state.as_ref() {
-                                if let Some(deadline) = lane_change_cooldown_until {
-                                    if deadline > now {
-                                        println!(
-                                            "[{}] 장애물 우선: 쿨다운 {:.0}ms 남았지만 무시하고 재계획합니다.",
-                                            id,
-                                            deadline
-                                                .saturating_duration_since(now)
-                                                .as_millis()
-                                        );
-                                    }
-                                }
-                                match publish_global_path(
+                            lane_change_request_active = true;
+                            if matches!(lateral_sm.state(), LateralDrivingState::LaneKeeping) {
+                                let _ = try_publish_path(
                                     id,
                                     &graph,
                                     &calib,
                                     &path_tx,
-                                    state,
+                                    latest_state.as_ref(),
                                     goal_key,
                                     &blocked_cache,
                                     &mut alive_cnt,
                                     &mut last_log,
                                     PathPlanningMode::ForceLaneChange,
-                                ) {
-                                    Ok(plan) => {
-                                        latest_plan = Some(plan);
-                                        lane_change_cooldown_until = None;
-                                        obstacle_lane_change_cooldown_until =
-                                            Some(now + calib.obstacle_lane_change_cooldown);
-                                    }
-                                    Err(err) => {
-                                        eprintln!(
-                                            "[{}] 전역 경로 생성 실패(ForceLaneChange): {}",
-                                            id, err
-                                        );
-                                        lane_change_cooldown_until =
-                                            Some(now + calib.lane_change_retry_cooldown);
-                                    }
-                                }
+                                );
                             }
+                        } else if matches!(lateral_sm.state(), LateralDrivingState::LaneKeeping) {
+                            if lane_change_request_active {
+                                println!(
+                                    "[{}] 장애물 해제: lane-change 요청을 종료합니다.",
+                                    id
+                                );
+                            }
+                            lane_change_request_active = false;
                         }
                     }
                     Err(RecvError::Lagged(skipped)) => {
@@ -229,232 +144,159 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
             msg = smoothed_rx.recv() => {
                 match msg {
                     Ok(smoothed_arc) => {
-                        let lane_state = smoothed_arc.lane_change_state;
-                        let changing = matches!(
-                            lane_state,
-                            AdasLaneChangeState::InnerToOuter | AdasLaneChangeState::OuterToInner
+                        let now = Instant::now();
+                        let (prev_state, new_state) = lateral_sm.update(
+                            smoothed_arc.as_ref(),
+                            latest_state.as_ref(),
+                            now,
                         );
-                        if changing {
-                            lane_change_in_progress = true;
-                        } else if lane_change_in_progress {
-                            if !lane_change_alignment_ready {
-                                lane_change_alignment_ready = true;
-                                lane_change_in_progress = false;
-                                release_lane_change_request_if_clear(
-                                    &mut lane_change_request_active,
-                                    obstacle_signal_active,
-                                    &mut blocked_nodes,
-                                    &mut blocked_cache,
+                        if prev_state != new_state {
+                            println!(
+                                "[{}] 횡방향 상태 전이: {:?} -> {:?}",
+                                id, prev_state, new_state
+                            );
+                            if matches!(new_state, LateralDrivingState::LaneKeeping)
+                                && !lane_change_sensor_active
+                                && lane_change_request_active
+                            {
+                                println!(
+                                    "[{}] 차선 변경 완료 감지: lane-change 요청을 해제합니다.",
+                                    id
                                 );
-                                continue;
-                            }
-                            if matches!(
-                                lane_state,
-                                AdasLaneChangeState::InnerCruise | AdasLaneChangeState::OuterCruise
-                            ) {
-                                lane_change_in_progress = false;
-                                release_lane_change_request_if_clear(
-                                    &mut lane_change_request_active,
-                                    obstacle_signal_active,
-                                    &mut blocked_nodes,
-                                    &mut blocked_cache,
-                                );
-                                continue;
-                            }
-                            let within_tolerance = latest_state
-                                .as_ref()
-                                .and_then(|state| {
-                                    lane_alignment_error(state, smoothed_arc.as_ref())
-                                })
-                                .map(|(lateral_err, heading_err)| {
-                                    lateral_err.abs()
-                                        <= calib.lane_change_completion_tolerance_m as f64
-                                        && heading_err <= lane_change_heading_tol_rad
-                                })
-                                .unwrap_or(true);
-                            if within_tolerance {
-                                lane_change_in_progress = false;
-                                release_lane_change_request_if_clear(
-                                    &mut lane_change_request_active,
-                                    obstacle_signal_active,
-                                    &mut blocked_nodes,
-                                    &mut blocked_cache,
-                                );
+                                lane_change_request_active = false;
                             }
                         }
                     }
                     Err(RecvError::Lagged(skipped)) => {
                         eprintln!("[{}] 스무딩 경로 업데이트 {}개 누락", id, skipped);
                     }
-                    Err(RecvError::Closed) => {}
+                    Err(RecvError::Closed) => {
+                        println!("[{}] 스무딩 경로 채널 종료, 전역 경로 러너블 종료", id);
+                        break;
+                    }
                 }
             }
             _ = tick.tick() => {
-                if lane_change_in_progress {
-                    continue;
-                }
-                if let Some(state) = latest_state.as_ref() {
-                    let now = Instant::now();
-                    refresh_blocked_nodes(&mut blocked_nodes, &mut blocked_cache, now);
-
-                    let obstacle_cooldown_active = obstacle_lane_change_cooldown_until
-                        .map_or(false, |deadline| now < deadline);
-                    let force_allowed = lane_change_request_active
-                        && !obstacle_cooldown_active
-                        && lane_change_cooldown_until.map_or(true, |deadline| now >= deadline);
-                    let mode = if force_allowed {
+                if matches!(lateral_sm.state(), LateralDrivingState::LaneKeeping) {
+                    let mode = if lane_change_request_active {
                         PathPlanningMode::ForceLaneChange
                     } else {
                         PathPlanningMode::Normal
                     };
-
-                    match publish_global_path(
+                    let _ = try_publish_path(
                         id,
                         &graph,
                         &calib,
                         &path_tx,
-                        state,
+                        latest_state.as_ref(),
                         goal_key,
                         &blocked_cache,
                         &mut alive_cnt,
                         &mut last_log,
                         mode,
-                    ) {
-                        Ok(plan) => {
-                            latest_plan = Some(plan);
-                            if matches!(mode, PathPlanningMode::ForceLaneChange) {
-                                lane_change_cooldown_until = None;
-                                obstacle_lane_change_cooldown_until =
-                                    Some(now + calib.obstacle_lane_change_cooldown);
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn try_publish_path(
+    id: &str,
+    graph: &PathGraph,
+    calib: &AdasPathGlobalCalibration,
+    path_tx: &tokio::sync::broadcast::Sender<std::sync::Arc<DtoAdasGlobalPath>>,
+    state: Option<&DtoLocalizationState>,
+    goal_key: NodeKey,
+    blocked: &HashSet<NodeKey>,
+    alive_cnt: &mut u32,
+    last_log: &mut Instant,
+    mode: PathPlanningMode,
+) {
+    let Some(state) = state else {
+        return;
+    };
+    if let Err(err) = publish_global_path(
+        id, graph, calib, path_tx, state, goal_key, blocked, alive_cnt, last_log, mode,
+    ) {
+        eprintln!("[{}] 전역 경로 생성 실패({:?}): {}", id, mode, err);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LateralDrivingState {
+    LaneKeeping,
+    LaneChanging,
+    LaneChangeSettled,
+}
+
+struct LateralStateMachine {
+    state: LateralDrivingState,
+    settle_since: Option<Instant>,
+}
+
+impl LateralStateMachine {
+    fn new() -> Self {
+        Self {
+            state: LateralDrivingState::LaneKeeping,
+            settle_since: None,
+        }
+    }
+
+    fn state(&self) -> LateralDrivingState {
+        self.state
+    }
+
+    fn update(
+        &mut self,
+        path: &DtoAdasSmoothedPath,
+        localization: Option<&DtoLocalizationState>,
+        now: Instant,
+    ) -> (LateralDrivingState, LateralDrivingState) {
+        let prev = self.state;
+        match self.state {
+            LateralDrivingState::LaneKeeping => {
+                if path_requires_lane_change(path) {
+                    self.state = LateralDrivingState::LaneChanging;
+                    self.settle_since = None;
+                }
+            }
+            LateralDrivingState::LaneChanging => {
+                if let Some((lateral_err, heading_err)) =
+                    localization.and_then(|state| lane_alignment_error(state, path))
+                {
+                    let within_heading = heading_err <= LANE_CHANGE_HEADING_TOL_RAD;
+                    let within_lateral = lateral_err.abs() <= LANE_CHANGE_LATERAL_TOL_M;
+                    if within_heading && within_lateral {
+                        if let Some(started) = self.settle_since {
+                            if now.duration_since(started) >= LANE_CHANGE_SETTLE_DURATION {
+                                self.state = LateralDrivingState::LaneChangeSettled;
+                                self.settle_since = None;
                             }
+                        } else {
+                            self.settle_since = Some(now);
                         }
-                        Err(err) => {
-                            eprintln!("[{}] 전역 경로 생성 실패({:?}): {}", id, mode, err);
-                            if matches!(mode, PathPlanningMode::ForceLaneChange) {
-                                lane_change_cooldown_until =
-                                    Some(now + calib.lane_change_retry_cooldown);
-                            }
-                        }
+                    } else {
+                        self.settle_since = None;
                     }
+                } else {
+                    self.settle_since = None;
                 }
             }
-        }
-    }
-}
-
-fn refresh_blocked_nodes(
-    blocked: &mut HashMap<NodeKey, Instant>,
-    cache: &mut HashSet<NodeKey>,
-    now: Instant,
-) {
-    blocked.retain(|_, &mut expires| expires > now);
-    cache.clear();
-    cache.extend(blocked.keys().copied());
-}
-
-fn release_lane_change_request_if_clear(
-    request_active: &mut bool,
-    obstacle_signal_active: bool,
-    blocked_nodes: &mut HashMap<NodeKey, Instant>,
-    blocked_cache: &mut HashSet<NodeKey>,
-) {
-    if *request_active && !obstacle_signal_active {
-        *request_active = false;
-        blocked_nodes.clear();
-        blocked_cache.clear();
-    }
-}
-
-fn compute_blocked_nodes(
-    plan: &PlannedPath,
-    state: &DtoLocalizationState,
-    threshold_m: f64,
-    heading_cos_threshold: f64,
-) -> Vec<NodeKey> {
-    if plan.waypoints.is_empty() {
-        return Vec::new();
-    }
-
-    let position = state.position_map_xy;
-    let mut nearest_idx = 0usize;
-    let mut best = f64::INFINITY;
-    for (idx, wp) in plan.waypoints.iter().enumerate() {
-        let dist = distance_2d(position, [wp.x, wp.y]);
-        if dist < best {
-            best = dist;
-            nearest_idx = idx;
-        }
-    }
-
-    let heading_unit = state
-        .motion_heading_rad
-        .map(|ang| [ang.cos(), ang.sin()])
-        .or_else(|| heading_from_plan(plan, nearest_idx))
-        .and_then(normalize_vec);
-
-    let mut blocked = Vec::new();
-    let mut accumulated = 0.0;
-    let mut prev = [plan.waypoints[nearest_idx].x, plan.waypoints[nearest_idx].y];
-
-    for wp in plan.waypoints.iter().skip(nearest_idx) {
-        if let Some(heading) = heading_unit {
-            let vec = [wp.x - position[0], wp.y - position[1]];
-            if let Some(dir) = normalize_vec(vec) {
-                let dot = dir[0] * heading[0] + dir[1] * heading[1];
-                if dot < heading_cos_threshold {
-                    continue;
-                }
+            LateralDrivingState::LaneChangeSettled => {
+                self.state = LateralDrivingState::LaneKeeping;
+                self.settle_since = None;
             }
         }
-
-        if blocked.is_empty() {
-            blocked.push(NodeKey {
-                lane: wp.lane,
-                index: wp.index,
-            });
-            continue;
-        }
-        let current = [wp.x, wp.y];
-        accumulated += distance_2d(prev, current);
-        if accumulated <= threshold_m {
-            blocked.push(NodeKey {
-                lane: wp.lane,
-                index: wp.index,
-            });
-            prev = current;
-        } else {
-            break;
-        }
-    }
-
-    blocked
-}
-
-fn distance_2d(a: [f64; 2], b: [f64; 2]) -> f64 {
-    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
-}
-
-fn normalize_vec(mut vec: [f64; 2]) -> Option<[f64; 2]> {
-    let norm = (vec[0] * vec[0] + vec[1] * vec[1]).sqrt();
-    if norm <= 1e-6 {
-        None
-    } else {
-        vec[0] /= norm;
-        vec[1] /= norm;
-        Some(vec)
+        (prev, self.state)
     }
 }
 
-fn heading_from_plan(plan: &PlannedPath, idx: usize) -> Option<[f64; 2]> {
-    let current = plan.waypoints.get(idx)?;
-    if let Some(next) = plan.waypoints.get(idx + 1) {
-        Some([next.x - current.x, next.y - current.y])
-    } else if let Some(prev_idx) = idx.checked_sub(1) {
-        let prev = plan.waypoints.get(prev_idx)?;
-        Some([current.x - prev.x, current.y - prev.y])
-    } else {
-        None
-    }
+fn path_requires_lane_change(path: &DtoAdasSmoothedPath) -> bool {
+    matches!(
+        path.lane_change_state,
+        AdasLaneChangeState::InnerToOuter | AdasLaneChangeState::OuterToInner
+    )
 }
 
 fn lane_alignment_error(
@@ -488,6 +330,17 @@ fn lane_alignment_error(
     let lateral = diff[0] * normal[0] + diff[1] * normal[1];
     let heading_err = angle_difference(path_heading, state_heading).abs();
     Some((lateral, heading_err))
+}
+
+fn normalize_vec(mut vec: [f64; 2]) -> Option<[f64; 2]> {
+    let norm = (vec[0] * vec[0] + vec[1] * vec[1]).sqrt();
+    if norm <= 1e-6 {
+        None
+    } else {
+        vec[0] /= norm;
+        vec[1] /= norm;
+        Some(vec)
+    }
 }
 
 fn angle_difference(a: f64, b: f64) -> f64 {

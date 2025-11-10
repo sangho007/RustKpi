@@ -1,14 +1,12 @@
 //! ADAS(Advanced Driver Assistance System) 제어 모듈.
 //! - `runnable_adas_lateral`: 차선 추정 결과를 이용해 조향 서보를 제어한다.
 //! - `runnable_adas_longitudinal`: 장애물과 신호 정보를 사용해 종방향 속도를 결정한다.
-
-use crate::asw::lib::adas_path_lib::curvature_from_smoothed_path;
 use crate::asw::lib::vs_trafficlight_lib::TrafficLightColor;
 use crate::calibration::{AdasLateralCalibration, AdasLongitudinalCalibration};
 use crate::rte::rte_dto::{
     AdasLaneChangeState, DtoAdasSmoothedPath, DtoCamLaneAngle, DtoDcMotorCtrl,
     DtoLocalizationArrival, DtoLocalizationState, DtoServoCtrl, DtoTrafficLight,
-    DtoTrafficLightDirective, DtoUltraSonicObstacle, DtoUltraSonicRaw,
+    DtoTrafficLightDirective, DtoUltraSonicObstacle,
 };
 use crate::rte::rte_main::RteChannels;
 use std::sync::Arc;
@@ -219,63 +217,30 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     }
 }
 
-fn apply_speed_rate_limit(
-    previous_speed: u32,
-    desired_speed: u32,
-    calib: &AdasLongitudinalCalibration,
-) -> u32 {
-    if desired_speed > previous_speed {
-        let step = calib.max_accel_delta_percent.max(1);
-        let delta = desired_speed - previous_speed;
-        previous_speed + delta.min(step)
-    } else if desired_speed < previous_speed {
-        let step = calib.max_decel_delta_percent.max(1);
-        let delta = previous_speed - desired_speed;
-        previous_speed.saturating_sub(delta.min(step))
-    } else {
-        desired_speed
-    }
-}
-
 /// ADAS Longitudinal 제어 러너블.
-/// - 초음파 거리, 장애물 분류, 신호등 색상을 통합해 속도 명령을 생성한다.
-/// - 멈춤/감속/순항 모드를 분기하고, 필요 시 Crawl 속도로 유지한다.
+/// - 장애물/신호등/목적지 도달 조건을 단순 상태머신으로 평가한다.
+/// - 정지 조건이면 즉시 정지, 아니면 순항 속도로 가속 명령을 유지한다.
 /// - 결과를 `control.dc_motor_tx` 채널로 브로드캐스트한다.
 pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels) {
     let calib = AdasLongitudinalCalibration::default();
 
-    let mut localization_rx = channels.localization.state_tx.subscribe();
-    let mut distance_rx = channels.ultrasonic.raw_tx.subscribe();
     let mut obstacle_rx = channels.ultrasonic.obstacle_tx.subscribe();
     let mut traffic_rx = channels.camera.traffic_light_tx.subscribe();
     let mut traffic_directive_rx = channels.camera.traffic_light_directive_tx.subscribe();
-    let mut path_rx = channels.path.smoothed_tx.subscribe();
     let mut arrival_rx = channels.localization.arrival_tx.subscribe();
     let mut imu_ready_rx = channels.imu.parsed_tx.subscribe();
     let dc_tx = channels.control.dc_motor_tx.clone();
 
     let mut tick = time::interval(calib.control_period);
-    let control_dt = calib.control_period.as_secs_f64();
 
-    // 가장 최근의 센싱 정보를 보관해 제어 주기마다 활용한다.
-    let mut latest_state: Option<Arc<DtoLocalizationState>> = None;
-    let mut latest_distance: Option<DtoUltraSonicRaw> = None;
     let mut latest_obstacle: Option<Arc<DtoUltraSonicObstacle>> = None;
     let mut latest_signal: Option<DtoTrafficLight> = None;
     let mut latest_directive: Option<Arc<DtoTrafficLightDirective>> = None;
-    let mut latest_path: Option<Arc<DtoAdasSmoothedPath>> = None;
     let mut latest_arrival: Option<Arc<DtoLocalizationArrival>> = None;
+
     let mut last_cmd: Option<(u32, u32)> = None;
-    let mut measured_speed_mps: f64 = 0.0;
-    let mut prev_speed_sample: Option<([f64; 2], u64)> = None;
-    let mut speed_pid_integral: f64 = 0.0;
-    let mut speed_pid_prev_error: Option<f64> = None;
     let mut alive_cnt: u32 = 0;
     let mut last_log = Instant::now();
-    let mut arrival_shutdown_triggered = false;
-    let mut stop_request_since: Option<Instant> = None;
-    let mut stop_release_since: Option<Instant> = None;
-    let mut stop_engaged = false;
     let mut ev_ready_released = false;
     let mut ev_ready_deadline: Option<Instant> = None;
     const EV_READY_HOLD_SECS: u64 = 3;
@@ -324,43 +289,12 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             }
         }
 
-        // Localization 상태 확인
-        match localization_rx.try_recv() {
-            Ok(dto) => {
-                let mut newest = dto;
-                while let Ok(newer) = localization_rx.try_recv() {
-                    newest = newer;
-                }
-                latest_state = Some(newest);
-            }
-            Err(TryRecvError::Lagged(n)) => {
-                eprintln!("[{}] ADAS longitudinal localization lagged by {}", id, n);
-            }
-            Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
-        }
-
-        // 초음파 거리 측정값 확인
-        match distance_rx.try_recv() {
-            Ok(dto) => {
-                latest_distance = Some(dto.as_ref().clone());
-                while let Ok(newer) = distance_rx.try_recv() {
-                    latest_distance = Some(newer.as_ref().clone());
-                }
-            }
-            Err(TryRecvError::Lagged(n)) => {
-                eprintln!("[{}] ADAS longitudinal distance lagged by {}", id, n);
-            }
-            Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
-        }
-
-        // 장애물 판별 결과 확인
         match obstacle_rx.try_recv() {
             Ok(dto) => {
-                let mut newest = dto;
+                latest_obstacle = Some(dto.clone());
                 while let Ok(newer) = obstacle_rx.try_recv() {
-                    newest = newer;
+                    latest_obstacle = Some(newer.clone());
                 }
-                latest_obstacle = Some(newest);
             }
             Err(TryRecvError::Lagged(n)) => {
                 eprintln!("[{}] ADAS longitudinal obstacle lagged by {}", id, n);
@@ -368,7 +302,6 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
         }
 
-        // 신호등 인식 결과 확인
         match traffic_rx.try_recv() {
             Ok(dto) => {
                 latest_signal = Some(dto.as_ref().clone());
@@ -381,13 +314,13 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             }
             Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
         }
+
         match traffic_directive_rx.try_recv() {
             Ok(dto) => {
-                let mut newest = dto;
+                latest_directive = Some(dto.clone());
                 while let Ok(newer) = traffic_directive_rx.try_recv() {
-                    newest = newer;
+                    latest_directive = Some(newer);
                 }
-                latest_directive = Some(newest);
             }
             Err(TryRecvError::Lagged(n)) => {
                 eprintln!(
@@ -397,26 +330,13 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             }
             Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
         }
-        match path_rx.try_recv() {
-            Ok(dto) => {
-                let mut newest = dto;
-                while let Ok(newer) = path_rx.try_recv() {
-                    newest = newer;
-                }
-                latest_path = Some(newest);
-            }
-            Err(TryRecvError::Lagged(n)) => {
-                eprintln!("[{}] ADAS longitudinal smoothed_path lagged by {}", id, n);
-            }
-            Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
-        }
+
         match arrival_rx.try_recv() {
             Ok(dto) => {
-                let mut newest = dto;
+                latest_arrival = Some(dto);
                 while let Ok(newer) = arrival_rx.try_recv() {
-                    newest = newer;
+                    latest_arrival = Some(newer);
                 }
-                latest_arrival = Some(newest);
             }
             Err(TryRecvError::Lagged(n)) => {
                 eprintln!("[{}] ADAS longitudinal arrival lagged by {}", id, n);
@@ -426,262 +346,50 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
 
         tick.tick().await;
 
-        if let Some(state) = latest_state.as_deref() {
-            if let Some((prev_pos, prev_ts)) = prev_speed_sample {
-                if state.timestamp_ns > prev_ts {
-                    let dt = (state.timestamp_ns - prev_ts) as f64 * 1e-9;
-                    if dt > 0.0 {
-                        let dx = state.position_map_xy[0] - prev_pos[0];
-                        let dy = state.position_map_xy[1] - prev_pos[1];
-                        let dist = (dx * dx + dy * dy).sqrt();
-                        let speed = dist / dt;
-                        if speed.is_finite() {
-                            measured_speed_mps = speed;
-                        }
-                    }
-                }
-            }
-            prev_speed_sample = Some((state.position_map_xy, state.timestamp_ns));
-        }
-
-        // 가장 최근 거리 값과 임계치 비교
-        let distance_cm = latest_obstacle
+        let obstacle_distance_cm = latest_obstacle
             .as_deref()
             .map(|o| o.distance_cm)
-            .or_else(|| latest_distance.as_ref().map(|d| d.distance));
-        let distance_state = match distance_cm {
-            Some(distance) => (
-                distance <= calib.stop_distance_cm,
-                distance <= calib.slowdown_distance_cm,
-            ),
-            None => (true, true),
-        };
-        let obstacle_status = latest_obstacle.as_deref();
-        let stop_requested_obstacle = obstacle_status.map(|d| d.stop_requested).unwrap_or(false);
-        let stop_requested_signal = latest_directive
-            .as_deref()
-            .map(|d| d.stop_requested && d.inside_detection_zone)
-            .unwrap_or(false);
-        let lane_change_requested = obstacle_status
-            .map(|d| d.lane_change_requested)
-            .unwrap_or(false);
-        let accelerate_requested = latest_directive
-            .as_deref()
-            .map(|d| d.accelerate_requested && d.inside_detection_zone)
-            .unwrap_or(false);
+            .unwrap_or(f32::MAX);
+        let obstacle_stop = obstacle_distance_cm <= 20.0;
+
         let traffic_color = latest_signal
             .as_ref()
             .map(|signal| signal.traffic_light_color.clone());
-        let arrival_state = latest_arrival
+        let in_detection_zone = latest_directive
+            .as_deref()
+            .map(|d| d.inside_detection_zone)
+            .unwrap_or(false);
+        let traffic_stop =
+            in_detection_zone && matches!(traffic_color.as_ref(), Some(TrafficLightColor::Red));
+
+        let arrival_stop = latest_arrival
             .as_deref()
             .map(|arrival| arrival.arrived)
             .unwrap_or(false);
 
-        // 장애물·신호·거리 조건을 종합해 정지 여부를 결정한다.
-        let obstacle_stop = stop_requested_obstacle || distance_state.0;
-        let traffic_stop =
-            matches!(traffic_color.as_ref(), Some(TrafficLightColor::Red)) || stop_requested_signal;
-        let arrival_stop = arrival_state;
+        let should_stop = obstacle_stop || traffic_stop || arrival_stop;
 
-        let caution_signal = matches!(
-            traffic_color.as_ref(),
-            Some(TrafficLightColor::Yellow | TrafficLightColor::Off)
-        );
-        let need_caution = if accelerate_requested {
-            false
-        } else {
-            caution_signal || distance_state.1 || lane_change_requested
-        };
-
-        let path_ready = latest_path
-            .as_deref()
-            .map(|path| !path.samples_xy.is_empty())
-            .unwrap_or(false);
-        let gating_reason = if !ev_ready_released {
-            Some("ev_ready")
-        } else if !path_ready {
-            Some("no_path")
-        } else {
-            None
-        };
-        let gating_stop = gating_reason.is_some();
-
-        let curvature_abs = latest_path
-            .as_deref()
-            .and_then(|path| curvature_from_smoothed_path(path).ok())
-            .map(|curv| curv.abs())
-            .unwrap_or(0.0);
-
-        let mut gain = 1.0;
-        let lane_change_active = latest_path
-            .as_deref()
-            .map(|path| {
-                matches!(
-                    path.lane_change_state,
-                    AdasLaneChangeState::InnerToOuter | AdasLaneChangeState::OuterToInner
-                )
-            })
-            .unwrap_or(false);
-        if lane_change_active {
-            gain = 1.0;
-        }
-
-        let base_stop_reason = if arrival_stop {
-            Some("arrival")
-        } else if obstacle_stop {
-            Some("obstacle")
-        } else if traffic_stop {
-            Some("traffic")
-        } else {
-            None
-        };
-        let effective_stop_reason = if let Some(reason) = gating_reason {
-            Some(reason)
-        } else {
-            base_stop_reason
-        };
-
-        let now = Instant::now();
-        if let Some(_reason) = effective_stop_reason {
-            if stop_request_since.is_none() {
-                stop_request_since = Some(now);
-            }
-            stop_release_since = None;
-            if stop_request_since
-                .map(|t| now.duration_since(t) >= calib.stop_request_hold_time)
-                .unwrap_or(false)
-            {
-                stop_engaged = true;
-            }
-        } else {
-            stop_request_since = None;
-            if stop_engaged {
-                if stop_release_since.is_none() {
-                    stop_release_since = Some(now);
-                }
-                if stop_release_since
-                    .map(|t| now.duration_since(t) >= calib.stop_release_hold_time)
-                    .unwrap_or(false)
-                {
-                    stop_engaged = false;
-                    stop_release_since = None;
-                }
-            }
-        }
-
-        if stop_engaged || gating_stop || effective_stop_reason.is_some() {
-            gain = 0.0;
-        } else if need_caution && !lane_change_active {
-            gain *= 0.6;
-        }
-
-        let mut target_speed_mps = if gain <= 0.0 {
-            0.0
-        } else {
-            calib.speed_target_mps * gain
-        };
-        if gating_stop {
-            target_speed_mps = 0.0;
-        }
-
-        let feedforward_percent = if target_speed_mps <= 0.0 || calib.speed_target_mps <= 0.0 {
-            0.0
-        } else {
-            target_speed_mps
-        };
-
-        let mut commanded_percent = if target_speed_mps <= 0.0 {
-            speed_pid_integral = 0.0;
-            speed_pid_prev_error = None;
-            0.0
-        } else {
-            let error = target_speed_mps - measured_speed_mps;
-            speed_pid_integral += error * control_dt;
-            if calib.speed_pid_integral_limit > 0.0 {
-                let limit = calib.speed_pid_integral_limit;
-                speed_pid_integral = speed_pid_integral.clamp(-limit, limit);
-            }
-            let derivative = if let Some(prev) = speed_pid_prev_error {
-                (error - prev) / control_dt
-            } else {
-                0.0
-            };
-            speed_pid_prev_error = Some(error);
-            feedforward_percent
-                + calib.speed_pid_kp * error
-                + calib.speed_pid_ki * speed_pid_integral
-                + calib.speed_pid_kd * derivative
-        };
-
-        commanded_percent = commanded_percent.clamp(0.0, 50.0);
-        let commanded_percent = commanded_percent.round() as u32;
-
-        let mut desired_command = if commanded_percent == 0 {
+        let command = if !ev_ready_released || should_stop {
             (0, 0)
         } else {
-            (1, commanded_percent)
+            (1, calib.cruise_speed_percent)
         };
 
-        let previous_speed = last_cmd.map(|(_, spd)| spd).unwrap_or(0);
-        let limited_speed = apply_speed_rate_limit(previous_speed, desired_command.1, &calib);
-        let limited_direction = if limited_speed == 0 { 0 } else { 1 };
-        let command = (limited_direction, limited_speed);
-
         if last_cmd.map(|prev| prev != command).unwrap_or(true) {
-            // 명령이 변경되었을 때만 DC 모터 채널로 전송해 불필요한 통신을 줄인다.
             let dto = DtoDcMotorCtrl::new(command.0, command.1, alive_cnt);
             let _ = dc_tx.send(Arc::new(dto));
             alive_cnt = alive_cnt.wrapping_add(1);
             last_cmd = Some(command);
         }
 
-        // 설정된 로깅 주기에 따라 상태를 출력한다.
-        if stop_engaged
-            && matches!(base_stop_reason, Some("arrival"))
-            && !arrival_shutdown_triggered
-        {
-            println!(
-                "[{}] Longitudinal: 목적지 도착 및 정차 완료, DC 모터 채널을 안전 종료합니다.",
-                id
-            );
-            if command.1 != 0 {
-                let dto = DtoDcMotorCtrl::new(0, 0, alive_cnt);
-                let _ = dc_tx.send(Arc::new(dto));
-                alive_cnt = alive_cnt.wrapping_add(1);
-            }
-            arrival_shutdown_triggered = true;
-            break;
-        }
-
         if last_log.elapsed() >= calib.log_interval {
-            let distance_str = distance_cm
-                .map(|d| format!("{:.1}", d))
-                .unwrap_or_else(|| "--".to_string());
-            let stop_display = if stop_engaged || gating_stop || effective_stop_reason.is_some() {
-                effective_stop_reason.unwrap_or("--")
-            } else {
-                "--"
-            };
-            let arrival_display = latest_arrival
-                .as_deref()
-                .map(|arrival| format!("{:.2}", arrival.distance_m))
-                .unwrap_or_else(|| "--".to_string());
             println!(
-                "[{}] Longitudinal: dist={}cm arrival={} arrival_dist={}m curvature={:.4} gain={:.2} stop={} lane_change={} accel_req={} path_ready={} signal={:?} speed={:.2}m/s target={:.2}m/s throttle={} -> dir={} speed={}",
+                "[{}] Longitudinal: stop={} obstacle={:.1}cm traffic={:?} arrival={} cmd=({}, {})",
                 id,
-                distance_str,
-                arrival_state,
-                arrival_display,
-                curvature_abs,
-                gain,
-                stop_display,
-                lane_change_requested,
-                accelerate_requested,
-                path_ready,
+                should_stop,
+                obstacle_distance_cm,
                 traffic_color,
-                measured_speed_mps,
-                target_speed_mps,
-                commanded_percent,
+                arrival_stop,
                 command.0,
                 command.1
             );

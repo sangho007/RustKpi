@@ -1373,6 +1373,7 @@ pub fn smooth_local_path(
 }
 
 /// 스무딩된 경로 샘플에서 곡률(2차 미분)을 계산한다.
+#[allow(dead_code)]
 pub fn curvature_from_smoothed_path(path: &DtoAdasSmoothedPath) -> Result<f64, &'static str> {
     curvature_from_samples(&path.samples_xy)
 }
@@ -1405,6 +1406,7 @@ fn initial_heading_from_points(points: &[DtoPathWaypoint]) -> Option<[f64; 2]> {
     None
 }
 
+#[allow(dead_code)]
 fn curvature_from_samples(samples: &[[f32; 2]]) -> Result<f64, &'static str> {
     if samples.len() < 6 {
         return Err("스무딩 샘플이 부족합니다 (최소 6개 필요)");
@@ -1450,6 +1452,7 @@ fn curvature_from_samples(samples: &[[f32; 2]]) -> Result<f64, &'static str> {
     Ok(curvature)
 }
 
+#[allow(dead_code)]
 fn heading_from_samples(samples: &[[f32; 2]]) -> Option<[f64; 2]> {
     let first = samples.first()?;
     for sample in samples.iter().skip(1) {
