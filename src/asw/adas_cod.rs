@@ -523,7 +523,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             })
             .unwrap_or(false);
         if lane_change_active {
-            gain = 2.0;
+            gain = 1.0;
         }
 
         let base_stop_reason = if arrival_stop {
