@@ -218,12 +218,12 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
 }
 
 /// ADAS Longitudinal 제어 러너블.
-/// - 장애물/신호등/목적지 도달 조건을 단순 상태머신으로 평가한다.
-/// - 정지 조건이면 즉시 정지, 아니면 순항 속도로 가속 명령을 유지한다.
-/// - 결과를 `control.dc_motor_tx` 채널로 브로드캐스트한다.
+/// - 장애물/신호등/목적지 도달 조건을 상태로 평가하고, 정지 상태가 아니면 목표 속도를 추종한다.
+/// - Localization 기반 속도 추정 + PID 제어를 사용해 DC 모터 듀티를 결정한다.
 pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels) {
     let calib = AdasLongitudinalCalibration::default();
 
+    let mut localization_rx = channels.localization.state_tx.subscribe();
     let mut obstacle_rx = channels.ultrasonic.obstacle_tx.subscribe();
     let mut traffic_rx = channels.camera.traffic_light_tx.subscribe();
     let mut traffic_directive_rx = channels.camera.traffic_light_directive_tx.subscribe();
@@ -233,6 +233,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
 
     let mut tick = time::interval(calib.control_period);
 
+    let mut latest_state: Option<Arc<DtoLocalizationState>> = None;
     let mut latest_obstacle: Option<Arc<DtoUltraSonicObstacle>> = None;
     let mut latest_signal: Option<DtoTrafficLight> = None;
     let mut latest_directive: Option<Arc<DtoTrafficLightDirective>> = None;
@@ -243,6 +244,10 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let mut last_log = Instant::now();
     let mut ev_ready_released = false;
     let mut ev_ready_deadline: Option<Instant> = None;
+    let mut measured_speed_mps: f64 = 0.0;
+    let mut prev_speed_sample: Option<([f64; 2], u64)> = None;
+    let mut speed_pid_integral: f64 = 0.0;
+    let mut speed_pid_prev_error: Option<f64> = None;
     const EV_READY_HOLD_SECS: u64 = 3;
 
     loop {
@@ -287,6 +292,20 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
                     );
                 }
             }
+        }
+
+        match localization_rx.try_recv() {
+            Ok(dto) => {
+                let mut newest = dto;
+                while let Ok(newer) = localization_rx.try_recv() {
+                    newest = newer;
+                }
+                latest_state = Some(newest);
+            }
+            Err(TryRecvError::Lagged(n)) => {
+                eprintln!("[{}] ADAS longitudinal localization lagged by {}", id, n);
+            }
+            Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
         }
 
         match obstacle_rx.try_recv() {
@@ -346,6 +365,24 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
 
         tick.tick().await;
 
+        if let Some(state) = latest_state.as_deref() {
+            if let Some((prev_pos, prev_ts)) = prev_speed_sample {
+                if state.timestamp_ns > prev_ts {
+                    let dt = (state.timestamp_ns - prev_ts) as f64 * 1e-9;
+                    if dt > 0.0 {
+                        let dx = state.position_map_xy[0] - prev_pos[0];
+                        let dy = state.position_map_xy[1] - prev_pos[1];
+                        let dist = (dx * dx + dy * dy).sqrt();
+                        let speed = dist / dt;
+                        if speed.is_finite() {
+                            measured_speed_mps = speed;
+                        }
+                    }
+                }
+            }
+            prev_speed_sample = Some((state.position_map_xy, state.timestamp_ns));
+        }
+
         let obstacle_distance_cm = latest_obstacle
             .as_deref()
             .map(|o| o.distance_cm)
@@ -369,11 +406,55 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
 
         let should_stop = obstacle_stop || traffic_stop || arrival_stop;
 
-        let command = if !ev_ready_released || should_stop {
+        let target_speed_mps = if !ev_ready_released || should_stop {
+            0.0
+        } else {
+            calib.speed_target_mps
+        };
+
+        let feedforward_percent = if target_speed_mps <= 0.0 || calib.speed_target_mps <= 0.0 {
+            0.0
+        } else {
+            target_speed_mps
+        };
+
+        let mut commanded_percent = if target_speed_mps <= 0.0 {
+            speed_pid_integral = 0.0;
+            speed_pid_prev_error = None;
+            0.0
+        } else {
+            let error = target_speed_mps - measured_speed_mps;
+            let control_dt = calib.control_period.as_secs_f64();
+            speed_pid_integral += error * control_dt;
+            if calib.speed_pid_integral_limit > 0.0 {
+                let limit = calib.speed_pid_integral_limit;
+                speed_pid_integral = speed_pid_integral.clamp(-limit, limit);
+            }
+            let derivative = if let Some(prev) = speed_pid_prev_error {
+                (error - prev) / control_dt
+            } else {
+                0.0
+            };
+            speed_pid_prev_error = Some(error);
+            feedforward_percent
+                + calib.speed_pid_kp * error
+                + calib.speed_pid_ki * speed_pid_integral
+                + calib.speed_pid_kd * derivative
+        };
+
+        commanded_percent = commanded_percent.clamp(0.0, 50.0);
+        let commanded_percent = commanded_percent.round() as u32;
+
+        let desired_command = if commanded_percent == 0 {
             (0, 0)
         } else {
-            (1, calib.cruise_speed_percent)
+            (1, commanded_percent)
         };
+
+        let previous_speed = last_cmd.map(|(_, spd)| spd).unwrap_or(0);
+        let limited_speed = apply_speed_rate_limit(previous_speed, desired_command.1, &calib);
+        let limited_direction = if limited_speed == 0 { 0 } else { 1 };
+        let command = (limited_direction, limited_speed);
 
         if last_cmd.map(|prev| prev != command).unwrap_or(true) {
             let dto = DtoDcMotorCtrl::new(command.0, command.1, alive_cnt);
@@ -384,17 +465,37 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
 
         if last_log.elapsed() >= calib.log_interval {
             println!(
-                "[{}] Longitudinal: stop={} obstacle={:.1}cm traffic={:?} arrival={} cmd=({}, {})",
+                "[{}] Longitudinal: stop={} obstacle={:.1}cm traffic={:?} arrival={} speed={:.2}m/s target={:.2}m/s cmd=({}, {})",
                 id,
                 should_stop,
                 obstacle_distance_cm,
                 traffic_color,
                 arrival_stop,
+                measured_speed_mps,
+                target_speed_mps,
                 command.0,
                 command.1
             );
             last_log = Instant::now();
         }
+    }
+}
+
+fn apply_speed_rate_limit(
+    previous_speed: u32,
+    desired_speed: u32,
+    calib: &AdasLongitudinalCalibration,
+) -> u32 {
+    if desired_speed > previous_speed {
+        let step = calib.max_accel_delta_percent.max(1);
+        let delta = desired_speed - previous_speed;
+        previous_speed + delta.min(step)
+    } else if desired_speed < previous_speed {
+        let step = calib.max_decel_delta_percent.max(1);
+        let delta = previous_speed - desired_speed;
+        previous_speed.saturating_sub(delta.min(step))
+    } else {
+        desired_speed
     }
 }
 
