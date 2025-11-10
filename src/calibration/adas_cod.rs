@@ -139,7 +139,7 @@ impl Default for AdasLongitudinalCalibration {
             speed_target_mps: 0.35,
             speed_pid_kp: 100.0,
             speed_pid_ki: 0.0,
-            speed_pid_kd: 0.0,
+            speed_pid_kd: 0.5,
             speed_pid_integral_limit: 0.4,
             slowdown_distance_cm: 5.0,
             stop_distance_cm: 5.0,
