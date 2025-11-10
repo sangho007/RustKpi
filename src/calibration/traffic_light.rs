@@ -66,7 +66,7 @@ impl Default for TrafficLightCalibration {
 
         Self {
             detection_interval: 5,
-            min_pixel_threshold: 100,
+            min_pixel_threshold: 50,
             dbscan_epsilon: 20.0,
             dbscan_min_points: 15,
             frame_width: width,
