@@ -514,6 +514,18 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             .unwrap_or(0.0);
 
         let mut gain = 1.0;
+        let lane_change_active = latest_path
+            .as_deref()
+            .map(|path| {
+                matches!(
+                    path.lane_change_state,
+                    AdasLaneChangeState::InnerToOuter | AdasLaneChangeState::OuterToInner
+                )
+            })
+            .unwrap_or(false);
+        if lane_change_active {
+            gain = 2.0;
+        }
         if curvature_abs > calib.curvature_slowdown_threshold {
             gain *= 0.8;
         }
@@ -563,7 +575,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
 
         if stop_engaged || gating_stop || effective_stop_reason.is_some() {
             gain = 0.0;
-        } else if need_caution {
+        } else if need_caution && !lane_change_active {
             gain *= 0.6;
         }
 
