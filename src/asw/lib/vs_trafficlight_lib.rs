@@ -76,16 +76,41 @@ impl Pipeline {
     }
 
     /// HSV 프레임에서 신호등 색상을 감지하고 내부 상태를 업데이트합니다.
+    /// 연산 부하를 줄이기 위해 320x240으로 다운스케일한 프레임을 사용해 마스크/클러스터링을 수행합니다.
     pub fn detect_color_from_hsv(&mut self, hsv_frame: &Mat) -> TrafficLightColor {
-        // 각 색상에 대한 마스크를 생성합니다.
+        // 1) 프레임 다운스케일 (기본 320x240). INTER_AREA로 축소 품질 유지.
+        let orig_w = hsv_frame.cols().max(1);
+        let orig_h = hsv_frame.rows().max(1);
+        let target_w = 320;
+        let target_h = 240;
+        let mut hsv_small = Mat::default();
+        let (scale_x, scale_y) = (target_w as f64 / orig_w as f64, target_h as f64 / orig_h as f64);
+        let mut scale = scale_x.min(scale_y);
+        if orig_w <= target_w || orig_h <= target_h {
+            // 원본이 더 작거나 같은 경우에는 업스케일하지 않고 원본을 그대로 사용
+            hsv_small = hsv_frame.clone();
+            scale = 1.0;
+        } else {
+            // dsize 지정으로 리사이즈 수행
+            let _ = imgproc::resize(
+                hsv_frame,
+                &mut hsv_small,
+                Size::new(target_w, target_h),
+                0.0,
+                0.0,
+                imgproc::INTER_AREA,
+            );
+        }
+
+        // 2) 각 색상에 대한 마스크 생성 (다운스케일 이미지 기준)
         let red_mask = self
-            .create_mask(hsv_frame, self.red_threshold)
+            .create_mask(&hsv_small, self.red_threshold)
             .unwrap_or_default();
         let yellow_mask = self
-            .create_mask(hsv_frame, self.yellow_threshold)
+            .create_mask(&hsv_small, self.yellow_threshold)
             .unwrap_or_default();
         let green_mask = self
-            .create_mask(hsv_frame, self.green_threshold)
+            .create_mask(&hsv_small, self.green_threshold)
             .unwrap_or_default();
 
         // --- ⬇️ 모폴로지 연산으로 노이즈 제거 ⬇️ ---
@@ -93,9 +118,19 @@ impl Pipeline {
         let yellow_mask_denoised = self.apply_morphology(&yellow_mask).unwrap_or(yellow_mask);
         let green_mask_denoised = self.apply_morphology(&green_mask).unwrap_or(green_mask);
 
-        let red_pixels = self.find_largest_cluster(&red_mask_denoised);
-        let yellow_pixels = self.find_largest_cluster(&yellow_mask_denoised);
-        let green_pixels = self.find_largest_cluster(&green_mask_denoised);
+        // 3) 해상도 축소에 맞춰 DBSCAN 파라미터를 스케일링한다.
+        //    - epsilon은 길이 비례로, min_points는 면적(=scale^2) 비례로 조정.
+        let eps_scaled = (self.dbscan_epsilon * scale).max(1.0);
+        let min_points_scaled = ((self.dbscan_min_points as f64) * scale * scale)
+            .round()
+            .max(1.0) as usize;
+
+        let red_pixels =
+            self.find_largest_cluster_with(&red_mask_denoised, eps_scaled, min_points_scaled);
+        let yellow_pixels =
+            self.find_largest_cluster_with(&yellow_mask_denoised, eps_scaled, min_points_scaled);
+        let green_pixels =
+            self.find_largest_cluster_with(&green_mask_denoised, eps_scaled, min_points_scaled);
 
         let detected_color = if red_pixels > self.min_pixel_threshold
             && red_pixels >= yellow_pixels
@@ -159,6 +194,11 @@ impl Pipeline {
     /// 마스크 이미지에서 가장 큰 픽셀 클러스터 크기를 계산한다.
     /// DBSCAN 결과를 기반으로 핵심/경계 포인트를 모두 카운트하며, 클러스터가 없으면 0을 반환한다.
     fn find_largest_cluster(&self, mask: &Mat) -> usize {
+        self.find_largest_cluster_with(mask, self.dbscan_epsilon, self.dbscan_min_points)
+    }
+
+    /// 다운스케일 등 상황에 맞춰 epsilon/min_points를 외부에서 지정할 수 있는 변형.
+    fn find_largest_cluster_with(&self, mask: &Mat, epsilon: f64, min_points: usize) -> usize {
         // 0이 아닌 픽셀의 좌표를 찾습니다.
         let mut points: Vec<[f64; 2]> = Vec::new();
         for r in 0..mask.rows() {
@@ -177,7 +217,7 @@ impl Pipeline {
         }
 
         // DBSCAN 모델을 설정하고 실행합니다.
-        let model = dbscan::Model::new(self.dbscan_epsilon, self.dbscan_min_points);
+        let model = dbscan::Model::new(epsilon, min_points);
 
         let points_as_vecs: Vec<Vec<f64>> = points.into_iter().map(|p| p.to_vec()).collect();
         let result = model.run(&points_as_vecs);

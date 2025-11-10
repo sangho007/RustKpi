@@ -199,14 +199,14 @@ pub const LOCALIZATION_ACTIVE_SCENARIO: LocalizationScenarioSelection =
         //destination: ONE_LANE_DESTINATIONS[0],
 
         // S자 맵
-        map: LocalizationMapId::SLane,
-        start: SLANE_STARTS[0],
-        destination: SLANE_DESTINATIONS[0],
+        //map: LocalizationMapId::SLane,
+        //start: SLANE_STARTS[0],
+        //destination: SLANE_DESTINATIONS[0],
 
         // 사거리 맵
-        //map: LocalizationMapId::Crossroad,
-        //start: CROSSROAD_STARTS[1],
-        //destination: CROSSROAD_DESTINATIONS[1],
+        map: LocalizationMapId::Crossroad,
+        start: CROSSROAD_STARTS[1],
+        destination: CROSSROAD_DESTINATIONS[3],
 
     };
 

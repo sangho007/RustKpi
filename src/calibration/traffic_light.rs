@@ -6,7 +6,19 @@ use crate::calibration::camera::CameraCalibration;
 
 const BASE_WIDTH: f32 = 640.0;
 const BASE_HEIGHT: f32 = 480.0;
-const BASE_ROI: [(i32, i32); 4] = [(100, 413), (270, 320), (370, 320), (540, 413)];
+/// BASE_ROI는 기본 해상도(640x480)에서의 4각형 ROI 꼭짓점 좌표다.
+/// 이미지 좌표계 기준: (0,0)은 좌상단, x는 오른쪽(+), y는 아래쪽(+).
+/// 정점 순서는 시계방향으로 다음과 같다.
+/// - (100, 413)  : 좌하(bottom-left)
+/// - (270, 320)  : 좌상(top-left)
+/// - (370, 320)  : 우상(top-right)
+/// - (540, 413)  : 우하(bottom-right)
+const BASE_ROI: [(i32, i32); 4] = [
+    (0, 480), // 좌하 (bottom-left)
+    (0, 0), // 좌상 (top-left)
+    (640, 0), // 우상 (top-right)
+    (640, 480), // 우하 (bottom-right)
+];
 
 #[derive(Clone, Copy, Debug)]
 /// HSV 색 공간에서 특정 색을 선택하기 위한 하한/상한 값.
@@ -25,6 +37,8 @@ pub struct TrafficLightCalibration {
     pub dbscan_min_points: usize,
     pub frame_width: i32,
     pub frame_height: i32,
+    /// 현재 카메라 해상도에 맞춰 스케일된 ROI 4각형 꼭짓점 좌표.
+    /// BASE_ROI에서 해상도 비율을 곱해 산출되며, 정점 순서는 BASE_ROI와 동일(좌하→좌상→우상→우하).
     pub roi_vertices: [(i32, i32); 4],
     pub red_threshold: TrafficLightColorThreshold,
     pub yellow_threshold: TrafficLightColorThreshold,
