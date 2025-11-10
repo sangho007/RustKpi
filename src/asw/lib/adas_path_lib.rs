@@ -1179,17 +1179,27 @@ pub fn try_publish_local_path(
 
     let nearest_idx = find_nearest_waypoint_index(global_path, state);
     let window = calib.waypoint_window.max(1);
-    let end = (nearest_idx + window).min(global_path.waypoints.len());
-    let mut segment = Vec::with_capacity(end - nearest_idx);
-    for wp in &global_path.waypoints[nearest_idx..end] {
-        segment.push(wp.clone());
-    }
+    let len = global_path.waypoints.len();
+    let end = (nearest_idx + window).min(len);
 
-    if end == global_path.waypoints.len() {
-        if let Some(goal) = global_path.waypoints.last() {
-            segment.clear();
-            segment.push(goal.clone());
-        }
+    // 기본 세그먼트
+    let mut segment = global_path.waypoints[nearest_idx..end].to_vec();
+
+    // 스무딩이 안정적으로 동작하도록 최소 길이를 보장한다.
+    let required_min = calib
+        .smoothing_min_samples
+        .saturating_add(calib.smoothing_skip_head)
+        .max(2);
+
+    // 글로벌 끝 구간에서는 마지막 절편으로 폴백해 최소 길이 확보.
+    if segment.len() < required_min || end == len {
+        let start = if nearest_idx + required_min > len {
+            len.saturating_sub(required_min)
+        } else {
+            nearest_idx
+        };
+        let start = start.min(len.saturating_sub(1));
+        segment = global_path.waypoints[start..len].to_vec();
     }
 
     let plan_id = global_path.alive_cnt;
