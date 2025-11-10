@@ -87,7 +87,7 @@ impl Default for AdasPathGlobalCalibration {
             nearest_heading_cos_threshold: 0.0,
             lane_change_retry_cooldown: Duration::from_millis(5000),
             obstacle_lane_change_cooldown: Duration::from_millis(5000),
-            obstacle_block_margin_m: 2.0,
+            obstacle_block_margin_m: 1.0,
             obstacle_block_timeout: Duration::from_millis(5000),
             obstacle_block_heading_tolerance_deg: 10.0,
             lane_change_completion_tolerance_m: 0.03,
