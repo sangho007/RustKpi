@@ -525,9 +525,6 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
         if lane_change_active {
             gain = 2.0;
         }
-        if curvature_abs > calib.curvature_slowdown_threshold {
-            gain *= 0.8;
-        }
 
         let base_stop_reason = if arrival_stop {
             Some("arrival")
@@ -590,8 +587,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
         let feedforward_percent = if target_speed_mps <= 0.0 || calib.speed_target_mps <= 0.0 {
             0.0
         } else {
-            (target_speed_mps / calib.speed_target_mps).clamp(0.0, 1.0)
-                * calib.cruise_speed_percent as f64
+            target_speed_mps
         };
 
         let mut commanded_percent = if target_speed_mps <= 0.0 {
@@ -617,7 +613,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
                 + calib.speed_pid_kd * derivative
         };
 
-        commanded_percent = commanded_percent.clamp(0.0, calib.cruise_speed_percent as f64);
+        commanded_percent = commanded_percent.clamp(0.0, 50.0);
         let commanded_percent = commanded_percent.round() as u32;
 
         let mut desired_command = if commanded_percent == 0 {

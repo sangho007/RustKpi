@@ -1,6 +1,6 @@
 //! ADAS 전역 경로 탐색 러너블.
 //! Localization 결과를 기반으로 출발 waypoint를 결정하고
-//! Python A* 구현을 포팅한 라이브러리(`adas_path_lib`)를 호출해 목적지까지의 경로를 생성한다.
+//! A* 구현을 포팅한 라이브러리(`adas_path_lib`)를 호출해 목적지까지의 경로를 생성한다.
 
 use crate::asw::lib::adas_path_lib::{
     NodeKey, PathGraph, PathPlanningMode, PlannedPath, publish_global_path,
