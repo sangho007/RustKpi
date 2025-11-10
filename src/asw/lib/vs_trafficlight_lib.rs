@@ -262,12 +262,22 @@ impl Pipeline {
         let target_w = 320;
         let target_h = 240;
         let mut hsv_small = Mat::default();
+        let mut bgr_small = Mat::default();
         if orig_w <= target_w || orig_h <= target_h {
             hsv_small = hsv;
+            bgr_small = bgr_input.clone();
         } else {
             imgproc::resize(
                 &hsv,
                 &mut hsv_small,
+                Size::new(target_w, target_h),
+                0.0,
+                0.0,
+                imgproc::INTER_AREA,
+            )?;
+            imgproc::resize(
+                bgr_input,
+                &mut bgr_small,
                 Size::new(target_w, target_h),
                 0.0,
                 0.0,
@@ -298,8 +308,13 @@ impl Pipeline {
         mv.push(g_chan);
         mv.push(r_chan);
         core::merge(&mv, &mut bgr)?;
+        // 원본(또는 다운스케일) BGR과 마스크 시각화를 오버레이한다.
+        let mut overlay = Mat::default();
+        // 안전을 위해 bgr_small가 비어 있으면 bgr를 베이스로 사용
+        let base = if bgr_small.empty() { &bgr } else { &bgr_small };
+        core::add_weighted(base, 0.6, &bgr, 0.4, 0.0, &mut overlay, -1)?;
 
-        Ok(bgr)
+        Ok(overlay)
     }
 }
 
