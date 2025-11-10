@@ -1032,7 +1032,8 @@ pub fn publish_global_path(
         ),
     };
 
-    let plan = graph.plan_path(
+    // 1차 시도: 현재 그래프/캘리브레이션으로 계획
+    let mut plan = match graph.plan_path(
         calib.global_planner,
         start_key,
         goal_key,
@@ -1041,7 +1042,60 @@ pub fn publish_global_path(
         max_lane_changes,
         calib.lane_change_forbidden_lookahead_m as f64,
         calib.lane_change_forbidden_penalty_scale as f64,
-    )?;
+    ) {
+        Ok(p) => p,
+        Err(e1) => {
+            // 실패 시 완화 재시도: 간선 후보/반경/전방 필터를 완화한 그래프로 1회 재시도
+            let mut relaxed = calib.clone();
+            // 전방 필터를 사실상 비활성화
+            relaxed.forward_tolerance_m = 1_000.0;
+            // 동일 차선 후보 수/반경 확대
+            relaxed.same_lane_neighbors = relaxed.same_lane_neighbors.saturating_add(2).min(12);
+            relaxed.max_same_lane_distance_m = (relaxed.max_same_lane_distance_m * 2.0).clamp(0.1, 2.0);
+            // 차선 변경 후보도 넉넉히
+            relaxed.cross_lane_neighbors = relaxed.cross_lane_neighbors.saturating_add(2).min(12);
+            relaxed.nearest_search_horizon = relaxed.nearest_search_horizon.saturating_add(8).min(64);
+
+            let relaxed_graph = match PathGraph::load(graph.map_id(), &relaxed) {
+                Ok(g) => g,
+                Err(e) => return Err(format!("완화 재시도: 그래프 로드 실패: {} (원인={})", e, e1)),
+            };
+            let start_relaxed = relaxed_graph
+                .nearest_waypoint(
+                    start_lane,
+                    position,
+                    heading,
+                    relaxed.nearest_search_horizon,
+                    relaxed.nearest_heading_cos_threshold,
+                )
+                .ok_or_else(|| format!("완화 재시도: lane={:?}에서 근접 waypoint 탐색 실패", start_lane))?;
+
+            match relaxed_graph.plan_path(
+                relaxed.global_planner,
+                start_relaxed,
+                goal_key,
+                blocked,
+                lane_change_penalty,
+                max_lane_changes,
+                relaxed.lane_change_forbidden_lookahead_m as f64,
+                relaxed.lane_change_forbidden_penalty_scale as f64,
+            ) {
+                Ok(p2) => {
+                    println!(
+                        "[{}] 전역 경로 재시도(완화) 성공: same_neighbors={} dist={:.2} forward_tol={:.1}",
+                        id,
+                        relaxed.same_lane_neighbors,
+                        relaxed.max_same_lane_distance_m,
+                        relaxed.forward_tolerance_m
+                    );
+                    p2
+                }
+                Err(e2) => {
+                    return Err(format!("전역 경로 생성 실패: 1차='{}', 완화='{}'", e1, e2));
+                }
+            }
+        }
+    };
     if plan.waypoints.is_empty() {
         return Err("경로 결과가 비어 있습니다.".to_string());
     }
