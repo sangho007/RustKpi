@@ -92,13 +92,14 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
         tick.tick().await;
 
         let lane_state = latest_path.as_deref().map(|path| path.lane_change_state);
+        let mut lane_angle_allowed = true;
 
-        let mut current_error = None;
+        let mut lateral_error = None;
 
         if let (Some(state), Some(smoothed_path)) =
             (latest_state.as_deref(), latest_path.as_deref())
         {
-            current_error = compute_lateral_error(state, smoothed_path, calib.pid_sample_index);
+            lateral_error = compute_lateral_error(state, smoothed_path, calib.pid_sample_index);
         }
 
         if let Some(state) = lane_state {
@@ -108,7 +109,8 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             ) {
                 integral_error = 0.0;
                 prev_error = None;
-                current_error = Some(0.0);
+                lateral_error = Some(0.0);
+                lane_angle_allowed = false;
             }
         }
 
@@ -116,8 +118,22 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             .as_ref()
             .map(|lane| lane.lateral_offset)
             .unwrap_or(0.0);
+        let lane_angle_deg = latest_lane_angle
+            .as_ref()
+            .map(|lane| lane.angle)
+            .unwrap_or(0.0);
+        let lane_angle_term = if lane_angle_allowed {
+            calib.w_lane_angle * lane_angle_deg
+        } else {
+            0.0
+        };
+        let mut control_error = lateral_error
+            .map(|err| calib.w_lateral_error * err + lane_angle_term);
+        if control_error.is_none() && lane_angle_term.abs() > f64::EPSILON {
+            control_error = Some(lane_angle_term);
+        }
 
-        if let Some(error) = current_error {
+        if let Some(error) = control_error {
             integral_error += error * dt_sec;
             if calib.pid_integral_limit > 0.0 {
                 let limit = calib.pid_integral_limit;
@@ -140,7 +156,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
         let base_cmd = calib.servo_neutral_deg as f64 + pid_output;
 
         //let base_cmd = calib.servo_neutral_deg as f64
-        //    - 450.0 * current_error.unwrap_or(0.0);
+        //    - 450.0 * control_error.unwrap_or(0.0);
             //+ 0.05 * lane_offset_px;
 
         let target_deg = base_cmd
@@ -164,7 +180,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
             target_deg
         };
 
-        //println!("[ADAS-COD] Lateral error : {}", current_error.unwrap_or(0.0));
+        //println!("[ADAS-COD] Lateral error : {:?}", lateral_error);
         //println!("[ADAS-COD] total cmd : {}", limited_deg);
 
 
@@ -175,7 +191,10 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
 
         // 1초마다 현재 제어 상태를 요약해 로깅한다.
         if last_log.elapsed() > std::time::Duration::from_secs(1) {
-            let error_display = current_error
+            let error_display = control_error
+                .map(|err| format!("{:.3}", err))
+                .unwrap_or_else(|| "--".to_string());
+            let lateral_display = lateral_error
                 .map(|err| format!("{:.3}", err))
                 .unwrap_or_else(|| "--".to_string());
             let state_display = lane_state
@@ -186,8 +205,15 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
                 .map(|s| format!("{:.2}", s.yaw_rad))
                 .unwrap_or_else(|| "--".to_string());
             println!(
-                "[{}] Lateral: yaw={} state={} -> servo={}deg error={} offset={}",
-                id, yaw_display, state_display, last_cmd_deg, current_error.unwrap_or(0.0), lane_offset_px
+                "[{}] Lateral: yaw={} state={} -> servo={}deg error={} lat_err={} angle={:.2}deg offset={}",
+                id,
+                yaw_display,
+                state_display,
+                last_cmd_deg,
+                error_display,
+                lateral_display,
+                lane_angle_deg,
+                lane_offset_px
             );
             last_log = Instant::now();
         }

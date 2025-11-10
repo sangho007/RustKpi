@@ -9,6 +9,10 @@ use std::time::Duration;
 /// 차선 각도 조향 제어 파라미터.
 /// 서보 각도 범위와 비례 제어 게인, 레이트 리밋 값을 포함한다.
 pub struct AdasLateralCalibration {
+    /// Lateral Error 가중치
+    pub w_lateral_error:f64,
+    ///  Lane Angle 가중치
+    pub w_lane_angle:f64,
     /// PID 비례 게인 (deg 명령 / m lateral error)
     pub pid_kp: f64,
     /// PID 적분 게인 (deg 명령 / (m·s))
@@ -39,6 +43,8 @@ impl Default for AdasLateralCalibration {
 impl AdasLateralCalibration {
     fn baseline() -> Self {
         Self {
+            w_lateral_error: 1.0,
+            w_lane_angle: 0.01,
             pid_kp: -1000.0,
             pid_ki: 0.0,
             pid_kd: 10.0,
