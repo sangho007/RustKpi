@@ -65,6 +65,7 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
     let mut blocked_nodes: HashMap<NodeKey, Instant> = HashMap::new();
     let mut blocked_cache: HashSet<NodeKey> = HashSet::new();
     let mut lane_change_requested = false;
+    let mut obstacle_lane_change_cooldown_until: Option<Instant> = None;
     let mut lane_change_cooldown_until: Option<Instant> = None;
     let mut lane_change_in_progress = false;
     let mut lane_change_alignment_ready = false;
@@ -117,6 +118,7 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                             blocked_nodes.clear();
                             blocked_cache.clear();
                             lane_change_cooldown_until = None;
+                            obstacle_lane_change_cooldown_until = None;
                             continue;
                         }
 
@@ -126,6 +128,16 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                                     "[{}] Lane change 진행 중이지만 장애물 우선 → 즉시 재계획을 진행합니다.",
                                     id
                                 );
+                            }
+                            if let Some(deadline) = obstacle_lane_change_cooldown_until {
+                                if deadline > now {
+                                    println!(
+                                        "[{}] 장애물 차선 변경 쿨다운 진행 중: {:.0}ms 남음",
+                                        id,
+                                        deadline.saturating_duration_since(now).as_millis()
+                                    );
+                                    continue;
+                                }
                             }
                             if let (Some(plan), Some(state)) =
                                 (latest_plan.as_ref(), latest_state.as_ref())
@@ -172,6 +184,8 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                                     Ok(plan) => {
                                         latest_plan = Some(plan);
                                         lane_change_cooldown_until = None;
+                                        obstacle_lane_change_cooldown_until =
+                                            Some(now + calib.obstacle_lane_change_cooldown);
                                     }
                                     Err(err) => {
                                         eprintln!(
@@ -247,7 +261,10 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                     let now = Instant::now();
                     refresh_blocked_nodes(&mut blocked_nodes, &mut blocked_cache, now);
 
+                    let obstacle_cooldown_active = obstacle_lane_change_cooldown_until
+                        .map_or(false, |deadline| now < deadline);
                     let force_allowed = lane_change_requested
+                        && !obstacle_cooldown_active
                         && lane_change_cooldown_until.map_or(true, |deadline| now >= deadline);
                     let mode = if force_allowed {
                         PathPlanningMode::ForceLaneChange
@@ -271,6 +288,8 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                             latest_plan = Some(plan);
                             if matches!(mode, PathPlanningMode::ForceLaneChange) {
                                 lane_change_cooldown_until = None;
+                                obstacle_lane_change_cooldown_until =
+                                    Some(now + calib.obstacle_lane_change_cooldown);
                             }
                         }
                         Err(err) => {
