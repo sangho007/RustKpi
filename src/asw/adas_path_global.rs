@@ -127,12 +127,14 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                             {
                                 let threshold =
                                     (obstacle.distance_cm as f64 / 100.0f64).max(0.0)
-                                        + calib.obstacle_block_margin_m as f64;
+                                        + calib.obstacle_block_margin_m as f64
+                                        + 0.10;
                                 for node in compute_blocked_nodes(
                                     plan,
                                     state,
                                     threshold,
                                     heading_cos_threshold,
+                                    calib.obstacle_block_start_offset_m as f64,
                                 ) {
                                     blocked_nodes
                                         .insert(node, now + calib.obstacle_block_timeout);
@@ -415,6 +417,7 @@ fn compute_blocked_nodes(
     state: &DtoLocalizationState,
     threshold_m: f64,
     heading_cos_threshold: f64,
+    start_offset_m: f64,
 ) -> Vec<NodeKey> {
     if plan.waypoints.is_empty() {
         return Vec::new();
@@ -441,7 +444,23 @@ fn compute_blocked_nodes(
     let mut accumulated = 0.0;
     let mut prev = [plan.waypoints[nearest_idx].x, plan.waypoints[nearest_idx].y];
 
-    for wp in plan.waypoints.iter().skip(nearest_idx) {
+    let mut start_idx = nearest_idx;
+    if start_offset_m > 0.0 {
+        let mut offset_accum = 0.0;
+        let mut prev_point = prev;
+        for (idx, wp) in plan.waypoints.iter().enumerate().skip(nearest_idx + 1) {
+            let point = [wp.x, wp.y];
+            offset_accum += distance_2d(prev_point, point);
+            prev_point = point;
+            if offset_accum >= start_offset_m {
+                start_idx = idx;
+                prev = point;
+                break;
+            }
+        }
+    }
+
+    for wp in plan.waypoints.iter().skip(start_idx) {
         if let Some(heading) = heading_unit {
             let vec = [wp.x - position[0], wp.y - position[1]];
             if let Some(dir) = normalize_vec(vec) {

@@ -51,6 +51,8 @@ pub struct AdasPathGlobalCalibration {
     pub obstacle_block_timeout: Duration,
     /// 장애물 차단 시 차량 헤딩과 비교할 허용 각도(도 단위).
     pub obstacle_block_heading_tolerance_deg: f32,
+    /// 장애물 차단을 시작하기 전에 건너뛸 거리(m).
+    pub obstacle_block_start_offset_m: f32,
     /// lane change 완료로 판단할 최대 횡방향 오차(m).
     pub lane_change_completion_tolerance_m: f32,
     /// lane change 완료 판정 시 허용할 yaw 차이(도 단위).
@@ -81,9 +83,10 @@ impl Default for AdasPathGlobalCalibration {
             max_lane_change_candidates: 8,
             nearest_search_horizon: 12,
             nearest_heading_cos_threshold: 0.0,
-            obstacle_block_margin_m: 1.0,
+            obstacle_block_margin_m: 0.5,
             obstacle_block_timeout: Duration::from_millis(5000),
             obstacle_block_heading_tolerance_deg: 10.0,
+            obstacle_block_start_offset_m: 0.3,
             lane_change_completion_tolerance_m: 0.03,
             lane_change_completion_heading_tolerance_deg: 15.0,
             lane_change_forbidden_lookahead_m: 0.5,
