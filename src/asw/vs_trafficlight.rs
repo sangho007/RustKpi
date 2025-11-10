@@ -32,6 +32,9 @@ pub async fn runnable_vs_detect_trafficlight(
         let mut last_lag_log: Option<Instant> = None;
         let mut last_detected_color = TrafficLightColor::Off;
         let mut latest_localization: Option<DtoLocalizationState> = None;
+        // 디버깅: 최근 신호등 색상 및 로그 타이머
+        let mut prev_reported_color = TrafficLightColor::Off;
+        let mut last_color_log = Instant::now();
 
         loop {
             let mut cam_raw = match rx.blocking_recv() {
@@ -99,7 +102,18 @@ pub async fn runnable_vs_detect_trafficlight(
                 let bgr_mat = cam_raw.as_bgr_mat()?;
                 let hsv = pipeline.convert_to_hsv(&bgr_mat)?;
                 let detected_color = pipeline.detect_color_from_hsv(&hsv);
-                last_detected_color = detected_color;
+                last_detected_color = detected_color.clone();
+                // 색상 변경 또는 주기적으로 현재 상태를 출력한다.
+                if detected_color != prev_reported_color
+                    || last_color_log.elapsed() >= Duration::from_millis(1000)
+                {
+                    println!(
+                        "[{}] Traffic: color={:?} inside_zone={} alive_cnt={}",
+                        id, detected_color, inside_zone, alive_cnt
+                    );
+                    prev_reported_color = detected_color.clone();
+                    last_color_log = Instant::now();
+                }
             } else if !inside_zone {
                 last_detected_color = TrafficLightColor::Off;
             }
