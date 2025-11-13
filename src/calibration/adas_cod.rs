@@ -45,7 +45,7 @@ impl AdasLateralCalibration {
         Self {
             w_lateral_error: 1.0,
             w_lane_angle: 0.0,
-            pid_kp: -500.0,
+            pid_kp: -4000.0,
             pid_ki: 0.1,
             pid_kd: 10.0,
             pid_integral_limit: 0.5,
