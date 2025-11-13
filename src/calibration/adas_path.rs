@@ -63,6 +63,8 @@ pub struct AdasPathGlobalCalibration {
     pub lane_change_forbidden_penalty_scale: f32,
     /// 전역 경로 탐색에 사용할 알고리즘.
     pub global_planner: GlobalPathPlanner,
+    /// 강제 차선 변경 모드에서 첫 lane change 전 동일 차선 간선에 더할 비용.
+    pub forced_same_lane_penalty_m: f32,
 }
 
 impl Default for AdasPathGlobalCalibration {
@@ -92,6 +94,7 @@ impl Default for AdasPathGlobalCalibration {
             lane_change_forbidden_lookahead_m: 0.5,
             lane_change_forbidden_penalty_scale: 0.4,
             global_planner: GlobalPathPlanner::HybridAStar,
+            forced_same_lane_penalty_m: 0.25,
             //global_planner: GlobalPathPlanner::AStar,
         }
     }

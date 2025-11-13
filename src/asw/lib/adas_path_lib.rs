@@ -90,6 +90,7 @@ impl PathGraph {
         max_lane_changes: u32,
         forbidden_lookahead_m: f64,
         forbidden_penalty_scale: f64,
+        force_same_lane_penalty: Option<f64>,
     ) -> Result<PlannedPath, String> {
         self.validate_plan_request(start, goal, blocked)?;
 
@@ -102,6 +103,7 @@ impl PathGraph {
                 max_lane_changes,
                 forbidden_lookahead_m,
                 forbidden_penalty_scale,
+                force_same_lane_penalty,
             ),
             GlobalPathPlanner::HybridAStar => self.plan_path_hybrid(
                 start,
@@ -111,6 +113,7 @@ impl PathGraph {
                 max_lane_changes,
                 forbidden_lookahead_m,
                 forbidden_penalty_scale,
+                force_same_lane_penalty,
             ),
         }
     }
@@ -270,6 +273,7 @@ impl PathGraph {
         max_lane_changes: u32,
         forbidden_lookahead_m: f64,
         forbidden_penalty_scale: f64,
+        force_same_lane_penalty: Option<f64>,
     ) -> Result<PlannedPath, String> {
         let mut open = BinaryHeap::new();
         let mut g_score: HashMap<(NodeKey, u32), f64> = HashMap::new();
@@ -325,7 +329,12 @@ impl PathGraph {
                 } else {
                     0.0
                 };
-                let step_cost = neighbor.distance + lane_penalty;
+                let mut step_cost = neighbor.distance + lane_penalty;
+                if let Some(extra) = force_same_lane_penalty {
+                    if node.lane_changes == 0 && !neighbor.lane_change {
+                        step_cost += extra;
+                    }
+                }
                 let tentative = node.cost + step_cost;
                 let neighbor_state = (neighbor.node, next_changes);
                 let entry = g_score.entry(neighbor_state).or_insert(f64::INFINITY);
@@ -430,6 +439,7 @@ impl PathGraph {
         max_lane_changes: u32,
         forbidden_lookahead_m: f64,
         forbidden_penalty_scale: f64,
+        force_same_lane_penalty: Option<f64>,
     ) -> Result<PlannedPath, String> {
         const HEADING_BINS: u16 = 36;
         const TURN_PENALTY_COEFF: f64 = 1.5; // 1.5
@@ -545,7 +555,12 @@ impl PathGraph {
                     0.0
                 };
 
-                let step_cost = neighbor.distance + lane_penalty + curvature_penalty;
+                let mut step_cost = neighbor.distance + lane_penalty + curvature_penalty;
+                if let Some(extra) = force_same_lane_penalty {
+                    if node.lane_changes == 0 && !neighbor.lane_change {
+                        step_cost += extra;
+                    }
+                }
                 let tentative = node.cost + step_cost;
 
                 let heading_idx = heading_to_index(next_heading, HEADING_BINS);
@@ -1017,6 +1032,12 @@ pub fn publish_global_path(
             calib.forced_max_lane_changes,
         ),
     };
+    let force_same_lane_penalty = match mode {
+        PathPlanningMode::ForceLaneChange => {
+            Some(calib.forced_same_lane_penalty_m.max(0.0) as f64)
+        }
+        PathPlanningMode::Normal => None,
+    };
 
     // 1차 시도: 현재 그래프/캘리브레이션으로 계획
     let mut plan = match graph.plan_path(
@@ -1028,6 +1049,7 @@ pub fn publish_global_path(
         max_lane_changes,
         calib.lane_change_forbidden_lookahead_m as f64,
         calib.lane_change_forbidden_penalty_scale as f64,
+        force_same_lane_penalty,
     ) {
         Ok(p) => p,
         Err(e1) => {
@@ -1077,6 +1099,7 @@ pub fn publish_global_path(
                 max_lane_changes,
                 relaxed.lane_change_forbidden_lookahead_m as f64,
                 relaxed.lane_change_forbidden_penalty_scale as f64,
+                force_same_lane_penalty,
             ) {
                 Ok(p2) => {
                     println!(
