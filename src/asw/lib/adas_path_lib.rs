@@ -1364,8 +1364,9 @@ pub fn smooth_local_path(
     let coeffs = fit_quintic_polynomial(&s_values, &d_values)
         .map_err(|err| format!("5차 다항식 피팅 실패: {}", err))?;
 
-    let max_s = *s_values.last().unwrap_or(&0.0);
-    if max_s <= f64::EPSILON {
+    let s_min = *s_values.first().unwrap_or(&0.0);
+    let s_max = *s_values.last().unwrap_or(&0.0);
+    if s_max <= f64::EPSILON {
         // 모든 waypoint가 동일한 위치일 때는 원본 좌표만 반환한다.
         return Ok(waypoints
             .iter()
@@ -1376,11 +1377,12 @@ pub fn smooth_local_path(
     let mut samples = Vec::with_capacity(sample_count);
     for i in 0..sample_count {
         let t = if sample_count == 1 {
-            0.0
+            1.0
         } else {
             i as f64 / (sample_count - 1) as f64
         };
-        let s = max_s * t;
+        // 데이터가 존재하는 구간[s_min, s_max]에서만 샘플링해 외삽을 피한다.
+        let s = s_min + (s_max - s_min) * t;
         let d = eval_quintic(&coeffs, s);
         let world = [
             origin_xy[0] + s * tangent[0] + d * normal[0],
