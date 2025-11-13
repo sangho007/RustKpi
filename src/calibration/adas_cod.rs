@@ -51,8 +51,8 @@ impl AdasLateralCalibration {
             pid_integral_limit: 0.5,
             pid_sample_index: 3,
             servo_neutral_deg: 90,
-            servo_min_deg: 20,
-            servo_max_deg: 160,
+            servo_min_deg: 15,
+            servo_max_deg: 165,
             servo_channel_index: 0,
             max_servo_delta_deg: 30,
         }
@@ -157,7 +157,7 @@ impl Default for AdasLongitudinalCalibration {
             max_decel_delta_percent: 12,
             steer_slow_min_deg: 75,
             steer_slow_max_deg: 105,
-            steer_slow_speed_mps: 0.15,
+            steer_slow_speed_mps: 0.25,
         }
     }
 }
