@@ -229,6 +229,8 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let mut traffic_directive_rx = channels.camera.traffic_light_directive_tx.subscribe();
     let mut arrival_rx = channels.localization.arrival_tx.subscribe();
     let mut imu_ready_rx = channels.imu.parsed_tx.subscribe();
+    // 서보 각도(조향각)도 함께 구독해 속도 목표를 조절한다.
+    let mut servo_rx = channels.control.servo_tx.subscribe();
     let dc_tx = channels.control.dc_motor_tx.clone();
 
     let mut tick = time::interval(calib.control_period);
@@ -248,6 +250,7 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
     let mut prev_speed_sample: Option<([f64; 2], u64)> = None;
     let mut speed_pid_integral: f64 = 0.0;
     let mut speed_pid_prev_error: Option<f64> = None;
+    let mut latest_servo_angle_deg: Option<u32> = None;
     const EV_READY_HOLD_SECS: u64 = 3;
 
     loop {
@@ -363,6 +366,21 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
             Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => {}
         }
 
+        // 최신 서보 각도(조향)도 드레인해 캐시한다.
+        loop {
+            match servo_rx.try_recv() {
+                Ok(dto) => {
+                    latest_servo_angle_deg = Some(dto.as_ref().angle);
+                    continue;
+                }
+                Err(TryRecvError::Lagged(_)) => {
+                    // 가장 최신 값만 유지하면 되므로 무시하고 계속
+                    continue;
+                }
+                Err(TryRecvError::Empty) | Err(TryRecvError::Closed) => break,
+            }
+        }
+
         tick.tick().await;
 
         if let Some(state) = latest_state.as_deref() {
@@ -406,11 +424,26 @@ pub async fn runnable_adas_longitudinal(id: &'static str, channels: RteChannels)
 
         let should_stop = obstacle_stop || traffic_stop || arrival_stop;
 
-        let target_speed_mps = if !ev_ready_released || should_stop {
+        let mut target_speed_mps = if !ev_ready_released || should_stop {
             0.0
         } else {
             calib.speed_target_mps
         };
+
+        // 조향각이 75~105도 사이면 목표 속도를 0.15로 제한한다.
+        if target_speed_mps > 0.0 && calib.steer_slow_speed_mps > 0.0 {
+            if let Some(servo_deg) = latest_servo_angle_deg {
+                let min_deg = calib
+                    .steer_slow_min_deg
+                    .min(calib.steer_slow_max_deg);
+                let max_deg = calib
+                    .steer_slow_min_deg
+                    .max(calib.steer_slow_max_deg);
+                if (min_deg..=max_deg).contains(&servo_deg) {
+                    target_speed_mps = target_speed_mps.min(calib.steer_slow_speed_mps);
+                }
+            }
+        }
 
         let feedforward_percent = if target_speed_mps <= 0.0 || calib.speed_target_mps <= 0.0 {
             0.0

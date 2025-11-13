@@ -126,6 +126,12 @@ pub struct AdasLongitudinalCalibration {
     pub max_accel_delta_percent: u32,
     /// 루프당 허용되는 감속 감소량(퍼센트 포인트).
     pub max_decel_delta_percent: u32,
+    /// 조향각 기반 속도 제한을 적용할 최소 각도(도). min ≤ servo ≤ max 일 때 적용.
+    pub steer_slow_min_deg: u32,
+    /// 조향각 기반 속도 제한을 적용할 최대 각도(도).
+    pub steer_slow_max_deg: u32,
+    /// 위 각도 구간일 때 사용할 목표 속도(m/s). 0 이하이면 기능 비활성.
+    pub steer_slow_speed_mps: f64,
 }
 
 impl Default for AdasLongitudinalCalibration {
@@ -137,7 +143,7 @@ impl Default for AdasLongitudinalCalibration {
             cruise_speed_percent: 30,
             crawl_speed_percent: 30,
             speed_target_mps: 0.25,
-            speed_pid_kp: 50.0,
+            speed_pid_kp: 80.0,
             speed_pid_ki: 0.2,
             speed_pid_kd: 5.0,
             speed_pid_integral_limit: 0.4,
@@ -149,6 +155,9 @@ impl Default for AdasLongitudinalCalibration {
             stop_release_hold_time: Duration::from_millis(300),
             max_accel_delta_percent: 5,
             max_decel_delta_percent: 12,
+            steer_slow_min_deg: 75,
+            steer_slow_max_deg: 105,
+            steer_slow_speed_mps: 0.15,
         }
     }
 }
