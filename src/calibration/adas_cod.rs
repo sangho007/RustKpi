@@ -155,8 +155,8 @@ impl Default for AdasLongitudinalCalibration {
             stop_release_hold_time: Duration::from_millis(300),
             max_accel_delta_percent: 5,
             max_decel_delta_percent: 12,
-            steer_slow_min_deg: 65,
-            steer_slow_max_deg: 115,
+            steer_slow_min_deg: 70,
+            steer_slow_max_deg: 110,
             steer_slow_speed_mps: 0.30,
         }
     }
