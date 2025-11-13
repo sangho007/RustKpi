@@ -261,6 +261,12 @@ pub const LOCALIZATION_MAP_PRESETS: &[LocalizationMapPreset] = &[
         destinations: &SLANE_DESTINATIONS,
     },
     LocalizationMapPreset {
+        map: LocalizationMapId::SLaneNew,
+        display_name: "S자 맵 새거",
+        starts: &SLANE_NEW_STARTS,
+        destinations: &SLANE_NEW_DESTINATIONS,
+    },
+    LocalizationMapPreset {
         map: LocalizationMapId::Crossroad,
         display_name: "사거리 맵",
         starts: &CROSSROAD_STARTS,
