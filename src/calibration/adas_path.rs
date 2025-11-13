@@ -65,6 +65,14 @@ pub struct AdasPathGlobalCalibration {
     pub global_planner: GlobalPathPlanner,
     /// 강제 차선 변경 모드에서 첫 lane change 전 동일 차선 간선에 더할 비용.
     pub forced_same_lane_penalty_m: f32,
+    /// 장애물 감지로 lane-change 요청을 시작할 기준 거리(cm).
+    pub obstacle_lane_change_request_cm: f32,
+    /// 곡률이 큰 구간에서 lane-change 요청 기준을 줄일 최소 한계(cm).
+    pub obstacle_lane_change_min_cm: f32,
+    /// 곡률 임계값(절대값)이 이 이상이면 기준 거리에서 감축 적용.
+    pub obstacle_curvature_threshold: f64,
+    /// 곡률이 임계 이상일 때 줄일 거리(cm).
+    pub obstacle_curvature_reduction_cm: f32,
 }
 
 impl Default for AdasPathGlobalCalibration {
@@ -95,6 +103,10 @@ impl Default for AdasPathGlobalCalibration {
             lane_change_forbidden_penalty_scale: 0.4,
             global_planner: GlobalPathPlanner::HybridAStar,
             forced_same_lane_penalty_m: 0.35,
+            obstacle_lane_change_request_cm: 55.0,
+            obstacle_lane_change_min_cm: 35.0,
+            obstacle_curvature_threshold: 0.02,
+            obstacle_curvature_reduction_cm: 15.0,
             //global_planner: GlobalPathPlanner::AStar,
         }
     }

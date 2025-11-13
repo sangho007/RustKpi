@@ -1400,6 +1400,20 @@ pub fn curvature_from_smoothed_path(path: &DtoAdasSmoothedPath) -> Result<f64, &
     curvature_from_samples(&path.samples_xy)
 }
 
+/// 로컬 경로(DtoAdasLocalPath)의 원본 waypoint들로부터 곡률(2차 미분 규모)을 계산한다.
+/// 스무딩을 거치지 않고, waypoint 좌표 시퀀스를 그대로 사용한다.
+pub fn curvature_from_local_path(local: &DtoAdasLocalPath) -> Result<f64, &'static str> {
+    if local.waypoints.len() < 6 {
+        return Err("스무딩 없는 곡률 계산을 위해 최소 6개 이상의 waypoint가 필요합니다.");
+    }
+    let samples: Vec<[f32; 2]> = local
+        .waypoints
+        .iter()
+        .map(|wp| wp.position_xy)
+        .collect();
+    curvature_from_samples(&samples)
+}
+
 fn initial_heading_from_global_path(path: &DtoAdasGlobalPath) -> Option<[f64; 2]> {
     let mut points = path.waypoints.iter();
     let first = points.next()?;

@@ -3,6 +3,7 @@
 
 use crate::asw::lib::adas_path_lib::{
     NodeKey, PathGraph, PathPlanningMode, PlannedPath, publish_global_path,
+    curvature_from_smoothed_path,
 };
 use crate::calibration::{AdasPathGlobalCalibration, LOCALIZATION_ACTIVE_SCENARIO};
 use crate::rte::rte_dto::{
@@ -19,7 +20,6 @@ use tokio::time::{self, MissedTickBehavior};
 const LANE_CHANGE_HEADING_TOL_RAD: f64 = 15.0_f64 * PI / 180.0;
 const LANE_CHANGE_LATERAL_TOL_M: f64 = 0.03;
 const LANE_CHANGE_SETTLE_DURATION: Duration = Duration::from_millis(1000);
-const LANE_CHANGE_REQUEST_DISTANCE_CM: f32 = 55.0;
 
 pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) {
     let calib = AdasPathGlobalCalibration::default();
@@ -76,6 +76,7 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
 
     let mut alive_cnt: u32 = 0;
     let mut last_log = Instant::now();
+    let mut latest_curvature: Option<f64> = None;
 
     loop {
         tokio::select! {
@@ -107,8 +108,20 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                             newest = newer;
                         }
                         let obstacle: DtoUltraSonicObstacle = newest.as_ref().clone();
+                        // 곡률이 큰 구간에서는 lane-change 요청 기준 거리를 줄인다.
+                        let mut lane_change_threshold_cm = calib.obstacle_lane_change_request_cm;
+                        if let Some(kappa) = latest_curvature {
+                            if kappa.abs() >= calib.obstacle_curvature_threshold {
+                                let reduced =
+                                    (calib.obstacle_lane_change_request_cm
+                                        - calib.obstacle_curvature_reduction_cm)
+                                        .max(calib.obstacle_lane_change_min_cm);
+                                lane_change_threshold_cm = reduced;
+                            }
+                        }
+
                         lane_change_sensor_active =
-                            obstacle.distance_cm <= LANE_CHANGE_REQUEST_DISTANCE_CM;
+                            obstacle.distance_cm <= lane_change_threshold_cm;
 
                         let now = Instant::now();
                         refresh_blocked_nodes(&mut blocked_nodes, &mut blocked_cache, now);
@@ -188,6 +201,10 @@ pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) 
                             latest_state.as_ref(),
                             now,
                         );
+                        // 최신 곡률을 업데이트한다(스무딩 궤적 기반).
+                        if let Ok(kappa) = curvature_from_smoothed_path(smoothed_arc.as_ref()) {
+                            latest_curvature = Some(kappa.abs());
+                        }
                         if prev_state != new_state {
                             println!(
                                 "[{}] 횡방향 상태 전이: {:?} -> {:?}",
