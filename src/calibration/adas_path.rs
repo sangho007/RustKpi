@@ -86,7 +86,7 @@ impl Default for AdasPathGlobalCalibration {
             nearest_search_horizon: 12,
             nearest_heading_cos_threshold: 0.0,
             obstacle_block_margin_m: 0.0,
-            obstacle_block_timeout: Duration::from_millis(7000),
+            obstacle_block_timeout: Duration::from_millis(9000),
             obstacle_block_heading_tolerance_deg: 45.0,
             obstacle_block_start_offset_m: 0.2,
             lane_change_completion_tolerance_m: 0.05,
