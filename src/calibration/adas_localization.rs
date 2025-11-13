@@ -20,7 +20,7 @@ impl LocalizationMapId {
         match self {
             LocalizationMapId::OneLane => "src/asw/lib/map_data_1lane_quantized_chagable.json",
             LocalizationMapId::SLane => "src/asw/lib/map_data_slane_quantized_chagable.json",
-            LocalizationMapId::SLaneNew => "src/asw/lib/map_data_slane_new_quantized_chagable.json",
+            LocalizationMapId::SLaneNew => "src/asw/lib/map_data_slane_new_quantized_changable.json",
             LocalizationMapId::Crossroad => "src/asw/lib/map_data_4lane_quantized_chagable.json",
         }
     }
