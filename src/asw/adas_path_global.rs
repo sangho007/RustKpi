@@ -19,7 +19,7 @@ use tokio::time::{self, MissedTickBehavior};
 const LANE_CHANGE_HEADING_TOL_RAD: f64 = 15.0_f64 * PI / 180.0;
 const LANE_CHANGE_LATERAL_TOL_M: f64 = 0.03;
 const LANE_CHANGE_SETTLE_DURATION: Duration = Duration::from_millis(1000);
-const LANE_CHANGE_REQUEST_DISTANCE_CM: f32 = 50.0;
+const LANE_CHANGE_REQUEST_DISTANCE_CM: f32 = 55.0;
 
 pub async fn runnable_adas_path_global(id: &'static str, channels: RteChannels) {
     let calib = AdasPathGlobalCalibration::default();
