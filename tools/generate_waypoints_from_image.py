@@ -64,8 +64,26 @@ def make_red_mask(arr: np.ndarray) -> np.ndarray:
 
 
 def make_blue_mask(arr: np.ndarray) -> np.ndarray:
+    """파란(outer) 레인 마스크 생성.
+
+    - 기본: HSV 색공간에서 파랑 Hue 구간(대략 100~140) + 충분한 채도/밝기.
+    - 보조: 진한 파랑 RGB 임계값(Blue↑, Red↓, Green↓)을 OR로 결합.
+
+    일부 이미지에서 G 채널이 낮은 진한 파랑은 기존 임계값으로 누락되어 outer가 사라질 수 있어
+    HSV 기반 마스크를 기본으로 사용하고, 보수적으로 RGB 임계와 합집합을 취해 강건성을 높였다.
+    """
+    # HSV 기반 마스크 (OpenCV Hue: 0~179)
+    hsv = cv2.cvtColor(arr, cv2.COLOR_RGB2HSV)
+    h = hsv[:, :, 0]
+    s = hsv[:, :, 1]
+    v = hsv[:, :, 2]
+    mask_hsv = (h >= 100) & (h <= 140) & (s >= 60) & (v >= 50)
+
+    # 진한 파랑 RGB 보조 마스크 (PIL->RGB 배열 기준)
     r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
-    return (b >= 200) & (r <= 80) & (g >= 80) & (g <= 180)
+    mask_rgb = (b >= 180) & (r <= 100) & (g <= 140)
+
+    return mask_hsv | mask_rgb
 
 
 def _shift(img: np.ndarray, dy: int, dx: int) -> np.ndarray:

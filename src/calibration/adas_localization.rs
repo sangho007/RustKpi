@@ -8,6 +8,8 @@ pub enum LocalizationMapId {
     OneLane,
     /// S자 코스.
     SLane,
+    /// S자 코스 새거
+    SLaneNew,
     /// 사거리(교차로) 코스.
     Crossroad,
 }
@@ -18,6 +20,7 @@ impl LocalizationMapId {
         match self {
             LocalizationMapId::OneLane => "src/asw/lib/map_data_1lane_quantized_chagable.json",
             LocalizationMapId::SLane => "src/asw/lib/map_data_slane_quantized_chagable.json",
+            LocalizationMapId::SLaneNew => "src/asw/lib/map_data_slane_new_quantized_chagable.json",
             LocalizationMapId::Crossroad => "src/asw/lib/map_data_4lane_quantized_chagable.json",
         }
     }
@@ -130,6 +133,39 @@ const SLANE_DESTINATIONS: [LocalizationDestination; 2] = [
     },
 ];
 
+
+const SLANE_NEW_STARTS: [LocalizationStart; 2] = [
+    LocalizationStart {
+        id: "start_inner",
+        display_name: "출발 1차선",
+        lane: LocalizationLane::Inner,
+        waypoint_index: 52,
+    },
+    LocalizationStart {
+        id: "start_outer",
+        display_name: "출발 2차선",
+        lane: LocalizationLane::Outer,
+        waypoint_index: 53,
+    },
+];
+
+const SLANE_NEW_DESTINATIONS: [LocalizationDestination; 2] = [
+    LocalizationDestination {
+        id: "goal_inner",
+        display_name: "도착 1차선",
+        lane: LocalizationLane::Inner,
+        waypoint_index: 0,
+        category: None,
+    },
+    LocalizationDestination {
+        id: "goal_outer",
+        display_name: "도착 2차선",
+        lane: LocalizationLane::Outer,
+        waypoint_index: 0,
+        category: None,
+    },
+];
+
 const CROSSROAD_STARTS: [LocalizationStart; 2] = [
     LocalizationStart {
         id: "start_inner",
@@ -176,6 +212,8 @@ const CROSSROAD_DESTINATIONS: [LocalizationDestination; 4] = [
     },
 ];
 
+
+
 /// 단일 시나리오 테스트용 지도/출발지/도착지 선택.
 /// 필요한 값만 고쳐서 다른 맵 조합을 빠르게 검증한다.
 #[derive(Clone, Copy, Debug)]
@@ -194,13 +232,13 @@ pub const LOCALIZATION_ARRIVAL_THRESHOLD_M: f64 = 0.10; // 10cm
 pub const LOCALIZATION_ACTIVE_SCENARIO: LocalizationScenarioSelection =
     LocalizationScenarioSelection {
         // 1자 맵
-        map: LocalizationMapId::OneLane,
-        start: ONE_LANE_STARTS[0],
-        destination: ONE_LANE_DESTINATIONS[0],
+        //map: LocalizationMapId::OneLane,
+        //start: ONE_LANE_STARTS[0],
+        //destination: ONE_LANE_DESTINATIONS[0],
         // S자 맵
-        //map: LocalizationMapId::SLane,
-        //start: SLANE_STARTS[1],
-        //destination: SLANE_DESTINATIONS[1],
+        map: LocalizationMapId::SLaneNew,
+        start: SLANE_NEW_STARTS[1],
+        destination: SLANE_NEW_DESTINATIONS[1],
 
         // 사거리 맵
         //map: LocalizationMapId::Crossroad,

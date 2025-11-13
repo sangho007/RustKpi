@@ -45,10 +45,15 @@ def waypoint_to_record(
         raise ValueError(f"Waypoint has no components in lane '{lane_name}'.")
 
     y_coord = point[1]
+    #if lane_name.startswith("inner"):
+    #   can_change = not (y_coord >= -0.75 and y_coord <= 0)
+    #elif lane_name.startswith("outer"):
+    #    can_change = not (y_coord >= -0.75 and y_coord <= 0) 
+
     if lane_name.startswith("inner"):
-        can_change = not (y_coord >= -0.75 and y_coord <= 0)
+       can_change = True
     elif lane_name.startswith("outer"):
-        can_change = not (y_coord >= -0.75 and y_coord <= 0) 
+        can_change = True
     else:
         can_change = True
 
