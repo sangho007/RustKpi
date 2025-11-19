@@ -22,45 +22,33 @@ pub async fn runnable_forwardcollision_obstacle_detection(
     let handle = tokio::task::spawn_blocking(move || {
         let mut rx = raw_tx.subscribe();
         let mut alive_cnt = 0;
-        let mut stop_cnt = 0;
-        let mut change_req_cnt = 0;
         let stop_threshold = calibration.stop_request_distance_cm;
         let lane_change_threshold = calibration
             .lane_change_request_distance_cm
             .max(stop_threshold);
+        const MIN_CONSECUTIVE: u8 = 3;
+        let mut stop_below_cnt: u8 = 0;
+        let mut lane_change_below_cnt: u8 = 0;
 
         loop {
             match rx.blocking_recv() {
                 Ok(ultrasonic_dto) => {
                     // 거리(cm)에 따라 정지/차선 변경 요청 여부를 판정한다.
                     let distance = ultrasonic_dto.distance;
-                    if (distance <= stop_threshold) {
-                        stop_cnt += 1;
-                    }
-                    if (distance <= lane_change_threshold) {
-                        change_req_cnt += 1;
-                    }
 
-                    let mut stop_requested = false;
-                    let mut lane_change_requested = false;
-
-                    if (stop_cnt >= 3) {
-                        stop_requested = true;
-                    }else {
-                        stop_cnt = 0;
-                        stop_requested = false;
+                    if distance <= stop_threshold {
+                        stop_below_cnt = stop_below_cnt.saturating_add(1);
+                    } else {
+                        stop_below_cnt = 0;
+                    }
+                    if distance <= lane_change_threshold {
+                        lane_change_below_cnt = lane_change_below_cnt.saturating_add(1);
+                    } else {
+                        lane_change_below_cnt = 0;
                     }
 
-                    if (change_req_cnt >= 3) {
-                        lane_change_requested = true;
-                    }else {
-                        change_req_cnt = 0;
-                        lane_change_requested = true;
-                    }
-
-
-                    //let stop_requested = distance <= stop_threshold;
-                    //let lane_change_requested = distance <= lane_change_threshold;
+                    let stop_requested = stop_below_cnt >= MIN_CONSECUTIVE;
+                    let lane_change_requested = lane_change_below_cnt >= MIN_CONSECUTIVE;
                     let obstacle_dto = Arc::new(DtoUltraSonicObstacle::new(
                         stop_requested,
                         lane_change_requested,
