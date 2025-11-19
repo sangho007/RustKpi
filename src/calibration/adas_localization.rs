@@ -241,6 +241,7 @@ pub const LOCALIZATION_ACTIVE_SCENARIO: LocalizationScenarioSelection =
         start: SLANE_NEW_STARTS[1],
         destination: SLANE_NEW_DESTINATIONS[1],
 
+
         // 사거리 맵
         //map: LocalizationMapId::Crossroad,
         //start: CROSSROAD_STARTS[1],
