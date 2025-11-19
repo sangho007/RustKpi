@@ -140,7 +140,7 @@ impl Default for AdasLongitudinalCalibration {
             control_period: Duration::from_millis(50),
             cruise_speed_percent: 30,
             crawl_speed_percent: 30,
-            speed_target_mps: 0.50,
+            speed_target_mps: 0.60,
             speed_pid_kp: 80.0,
             speed_pid_ki: 0.2,
             speed_pid_kd: 5.0,
@@ -155,7 +155,7 @@ impl Default for AdasLongitudinalCalibration {
             max_decel_delta_percent: 12,
             steer_slow_min_deg: 75,
             steer_slow_max_deg: 105,
-            steer_slow_speed_mps: 0.38,
+            steer_slow_speed_mps: 0.48,
         }
     }
 }
