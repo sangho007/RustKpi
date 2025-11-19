@@ -26,7 +26,7 @@ pub async fn runnable_adas_lateral(id: &'static str, channels: RteChannels) {
     let servo_tx = channels.control.servo_tx.clone();
 
     // 제어 루프 주기(기본 50ms)
-    let control_period = Duration::from_millis(100);
+    let control_period = Duration::from_millis(10);
     let mut tick = time::interval(control_period);
     let dt_sec = control_period.as_secs_f64();
 
