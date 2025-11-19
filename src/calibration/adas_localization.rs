@@ -237,15 +237,15 @@ pub const LOCALIZATION_ACTIVE_SCENARIO: LocalizationScenarioSelection =
         //destination: ONE_LANE_DESTINATIONS[0],
 
         // S자 맵
-        map: LocalizationMapId::SLaneNew,
-        start: SLANE_NEW_STARTS[1],
-        destination: SLANE_NEW_DESTINATIONS[1],
+        //map: LocalizationMapId::SLaneNew,
+        //start: SLANE_NEW_STARTS[1],
+        //destination: SLANE_NEW_DESTINATIONS[1],
 
 
         // 사거리 맵
-        //map: LocalizationMapId::Crossroad,
-        //start: CROSSROAD_STARTS[1],
-        //destination: CROSSROAD_DESTINATIONS[3],
+        map: LocalizationMapId::Crossroad,
+        start: CROSSROAD_STARTS[1],
+        destination: CROSSROAD_DESTINATIONS[1],
     };
 
 /// ADAS Localization에서 선택 가능한 지도 프리셋.
