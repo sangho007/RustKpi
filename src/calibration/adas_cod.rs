@@ -149,7 +149,7 @@ impl Default for AdasLongitudinalCalibration {
             stop_distance_cm: 20.0,
             log_interval: Duration::from_secs(1),
             curvature_slowdown_threshold: 0.015,
-            stop_request_hold_time: Duration::from_millis(200),
+            stop_request_hold_time: Duration::from_millis(500),
             stop_release_hold_time: Duration::from_millis(300),
             max_accel_delta_percent: 5,
             max_decel_delta_percent: 12,
