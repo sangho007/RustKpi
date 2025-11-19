@@ -103,10 +103,10 @@ impl Default for AdasPathGlobalCalibration {
             lane_change_forbidden_penalty_scale: 0.4,
             global_planner: GlobalPathPlanner::HybridAStar,
             forced_same_lane_penalty_m: 0.35,
-            obstacle_lane_change_request_cm: 45.0,
-            obstacle_lane_change_min_cm: 45.0,
-            obstacle_curvature_threshold: 0.02,
-            obstacle_curvature_reduction_cm: 15.0,
+            obstacle_lane_change_request_cm: 0.0, //45.0
+            obstacle_lane_change_min_cm: 0.0, // 45.0
+            obstacle_curvature_threshold: 0.0, //0.02
+            obstacle_curvature_reduction_cm: 0.0, //15.0
             //global_planner: GlobalPathPlanner::AStar,
         }
     }
