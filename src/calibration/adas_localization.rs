@@ -232,14 +232,14 @@ pub const LOCALIZATION_ARRIVAL_THRESHOLD_M: f64 = 0.10; // 10cm
 pub const LOCALIZATION_ACTIVE_SCENARIO: LocalizationScenarioSelection =
     LocalizationScenarioSelection {
         // 1자 맵
-        map: LocalizationMapId::OneLane,
-        start: ONE_LANE_STARTS[0],
-        destination: ONE_LANE_DESTINATIONS[0],
+        //map: LocalizationMapId::OneLane,
+        //start: ONE_LANE_STARTS[0],
+        //destination: ONE_LANE_DESTINATIONS[0],
 
         // S자 맵
-        //map: LocalizationMapId::SLaneNew,
-        //start: SLANE_NEW_STARTS[1],
-        //destination: SLANE_NEW_DESTINATIONS[1],
+        map: LocalizationMapId::SLaneNew,
+        start: SLANE_NEW_STARTS[1],
+        destination: SLANE_NEW_DESTINATIONS[1],
 
         // 사거리 맵
         //map: LocalizationMapId::Crossroad,
