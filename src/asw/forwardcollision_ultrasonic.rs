@@ -22,6 +22,8 @@ pub async fn runnable_forwardcollision_obstacle_detection(
     let handle = tokio::task::spawn_blocking(move || {
         let mut rx = raw_tx.subscribe();
         let mut alive_cnt = 0;
+        let mut stop_cnt = 0;
+        let mut change_req_cnt = 0;
         let stop_threshold = calibration.stop_request_distance_cm;
         let lane_change_threshold = calibration
             .lane_change_request_distance_cm
@@ -32,8 +34,33 @@ pub async fn runnable_forwardcollision_obstacle_detection(
                 Ok(ultrasonic_dto) => {
                     // 거리(cm)에 따라 정지/차선 변경 요청 여부를 판정한다.
                     let distance = ultrasonic_dto.distance;
-                    let stop_requested = distance <= stop_threshold;
-                    let lane_change_requested = distance <= lane_change_threshold;
+                    if (distance <= stop_threshold) {
+                        stop_cnt += 1;
+                    }
+                    if (distance <= lane_change_threshold) {
+                        change_req_cnt += 1;
+                    }
+
+                    let mut stop_requested = false;
+                    let mut lane_change_requested = false;
+
+                    if (stop_cnt >= 3) {
+                        stop_requested = true;
+                    }else {
+                        stop_cnt = 0;
+                        stop_requested = false;
+                    }
+
+                    if (change_req_cnt >= 3) {
+                        lane_change_requested = true;
+                    }else {
+                        change_req_cnt = 0;
+                        lane_change_requested = true;
+                    }
+
+
+                    //let stop_requested = distance <= stop_threshold;
+                    //let lane_change_requested = distance <= lane_change_threshold;
                     let obstacle_dto = Arc::new(DtoUltraSonicObstacle::new(
                         stop_requested,
                         lane_change_requested,
