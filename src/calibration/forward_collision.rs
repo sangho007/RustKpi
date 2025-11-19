@@ -13,7 +13,7 @@ impl Default for ForwardCollisionCalibration {
     fn default() -> Self {
         Self {
             stop_request_distance_cm: 20.0,
-            lane_change_request_distance_cm: 55.0,
+            lane_change_request_distance_cm: 45.0,
         }
     }
 }
