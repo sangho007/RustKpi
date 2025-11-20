@@ -49,7 +49,7 @@ impl AdasLateralCalibration {
             pid_ki: 0.1,
             pid_kd: 10.0,
             pid_integral_limit: 0.05,
-            pid_sample_index: 6,
+            pid_sample_index: 10,  //6
             servo_neutral_deg: 90,
             servo_min_deg: 15,
             servo_max_deg: 165,
