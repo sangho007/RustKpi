@@ -98,13 +98,13 @@ impl Default for AdasPathGlobalCalibration {
             obstacle_block_heading_tolerance_deg: 45.0,
             obstacle_block_start_offset_m: 0.2,
             lane_change_completion_tolerance_m: 0.05,
-            lane_change_completion_heading_tolerance_deg: 30.0,
+            lane_change_completion_heading_tolerance_deg: 10.0,
             lane_change_forbidden_lookahead_m: 0.5,
             lane_change_forbidden_penalty_scale: 0.4,
             global_planner: GlobalPathPlanner::HybridAStar,
             forced_same_lane_penalty_m: 0.35,
-            obstacle_lane_change_request_cm: 65.0, //45.0
-            obstacle_lane_change_min_cm: 65.0, // 45.0
+            obstacle_lane_change_request_cm:455.0, //45.0
+            obstacle_lane_change_min_cm: 45.0, // 45.0
             obstacle_curvature_threshold: 0.02, //0.02
             obstacle_curvature_reduction_cm: 15.0, //15.0
             //global_planner: GlobalPathPlanner::AStar,
